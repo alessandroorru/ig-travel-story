@@ -79,6 +79,15 @@ p {
   text-wrap: pretty;
 }
 
+.editor__header h2 {
+  max-width: 12ch;
+  margin: 0;
+  font-size: clamp(2.35rem, 5vw, 4.4rem);
+  font-weight: 760;
+  letter-spacing: -0.06em;
+  line-height: 0.94;
+}
+
 .editor__intro {
   max-width: 39rem;
   margin: 1.15rem 0 0;
@@ -181,6 +190,14 @@ input[type="file"]::file-selector-button {
   font-variant-numeric: tabular-nums;
 }
 
+.zoom-touch-hint {
+  display: none;
+  margin: 0;
+  color: #a9a9a4;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
 input[type="range"] {
   min-height: 2.75rem;
   accent-color: #ff3b30;
@@ -281,7 +298,7 @@ input[type="range"] {
   aspect-ratio: 9 / 16;
   background: #10100f;
   cursor: grab;
-  touch-action: none;
+  touch-action: pan-y;
 }
 
 .instagram-preview-overlay {
@@ -307,6 +324,15 @@ input[type="range"] {
   .preview {
     width: min(100%, 42rem);
     margin: 0 auto;
+  }
+
+  .field--zoom .field__heading,
+  .field--zoom input[type="range"] {
+    display: none;
+  }
+
+  .zoom-touch-hint {
+    display: block;
   }
 }
 

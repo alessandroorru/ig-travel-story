@@ -52,10 +52,11 @@ test('exposes the complete labelled editing form with exact input contracts', ()
   assert.match(elementWithId('button', 'download'), /type=["']button["'][^>]*\bdisabled\b/);
 });
 
-test('keeps the concise editor header and places composition controls below the photo upload', () => {
+test('uses a Story studio eyebrow and a visible template title above composition controls', () => {
+  assert.match(html, /<p[^>]*class=["']eyebrow["'][^>]*>\s*Story studio\s*<\/p>/i);
   const editorTitle = elementWithId('h2', 'editor-title');
-  assertAttribute(editorTitle, 'class', 'eyebrow');
-  assert.match(html, /<h2[^>]*\bid=["']editor-title["'][^>]*>\s*Story studio\s*<\/h2>/i);
+  assert.doesNotMatch(editorTitle, /\bclass=["']eyebrow["']/i);
+  assert.match(html, /<h2[^>]*\bid=["']editor-title["'][^>]*>\s*Instagram Story Template\s*<\/h2>/i);
   assert.doesNotMatch(html, /Racconta il viaggio, un giorno alla volta\./i);
   assert.match(html, /La foto rimane su questo dispositivo/i);
 
@@ -174,8 +175,12 @@ test('uses responsive local styling with visible focus and canvas-only gesture c
   assert.match(css, /grid-template-columns:\s*minmax\([^;]+\)\s+minmax\(/);
   assert.match(css, /@media\s*\(max-width:\s*60rem\)/);
   assert.match(css, /:focus-visible/);
-  assert.match(css, /#story-canvas\s*\{[^}]*touch-action:\s*none/s);
-  assert.equal((css.match(/touch-action:\s*none/g) ?? []).length, 1);
+  assert.match(css, /#story-canvas\s*\{[^}]*touch-action:\s*pan-y/s);
+  assert.equal((css.match(/touch-action:\s*none/g) ?? []).length, 0);
+  assert.match(html, /<p class=["']zoom-touch-hint["']>Usa due dita per spostare e ingrandire la foto\.<\/p>/);
+  assert.match(css, /\.zoom-touch-hint\s*\{[^}]*\bdisplay:\s*none\b/s);
+  assert.match(css, /@media\s*\(max-width:\s*60rem\)\s*\{[\s\S]*?\.field--zoom\s+\.field__heading\s*,\s*\.field--zoom\s+input\[type=["']range["']\]\s*\{[^}]*\bdisplay:\s*none\b/s);
+  assert.match(css, /@media\s*\(max-width:\s*60rem\)\s*\{[\s\S]*?\.zoom-touch-hint\s*\{[^}]*\bdisplay:\s*block\b/s);
   assert.doesNotMatch(css, /@import|url\s*\(/i);
 });
 
@@ -200,12 +205,18 @@ class FakeElement {
     this.disabled = true;
     this.textContent = '';
     this.listeners = new Map();
+    this.listenerOptions = new Map();
+    this.focusCalls = 0;
+    this.pointerCaptures = [];
   }
 
-  addEventListener(type, listener) {
+  addEventListener(type, listener, options) {
     const listeners = this.listeners.get(type) ?? [];
     listeners.push(listener);
     this.listeners.set(type, listeners);
+    const optionsForType = this.listenerOptions.get(type) ?? [];
+    optionsForType.push(options);
+    this.listenerOptions.set(type, optionsForType);
   }
 
   emit(type, event = {}) {
@@ -215,8 +226,8 @@ class FakeElement {
   }
 
   setAttribute() {}
-  focus() {}
-  setPointerCapture() {}
+  focus() { this.focusCalls += 1; }
+  setPointerCapture(pointerId) { this.pointerCaptures.push(pointerId); }
   releasePointerCapture() {}
   hasPointerCapture() { return false; }
 }
@@ -274,6 +285,7 @@ function createAppFixture() {
   canvas.clientWidth = 540;
   canvas.clientHeight = 960;
   canvas.getContext = () => context;
+  canvas.getBoundingClientRect = () => ({ left: 100, top: 200, width: 540, height: 960 });
 
   const images = [];
   class FakeImage extends FakeElement {
@@ -332,6 +344,97 @@ test('synchronizes the DOM order with mobile media changes', async () => {
 
     changeListener({ matches: true });
     assert.deepEqual(fixture.appShell.children, [fixture.preview, fixture.editor]);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.Image = originalImage;
+    globalThis.URL = originalUrl;
+    globalThis.matchMedia = originalMatchMedia;
+  }
+});
+
+test('keeps single-touch scrolling native and applies continuous two-touch pan and pinch', async () => {
+  const fixture = createAppFixture();
+  const originalDocument = globalThis.document;
+  const originalImage = globalThis.Image;
+  const originalUrl = globalThis.URL;
+  const originalMatchMedia = globalThis.matchMedia;
+  let nextUrl = 0;
+
+  globalThis.document = {
+    querySelector: (selector) => fixture.elements.get(selector),
+  };
+  globalThis.Image = fixture.FakeImage;
+  globalThis.URL = {
+    createObjectURL: () => `blob:test-${++nextUrl}`,
+    revokeObjectURL() {},
+  };
+  globalThis.matchMedia = undefined;
+
+  try {
+    await import(`${appUrl.href}?two-touch=${Date.now()}`);
+    const canvas = fixture.elements.get('#story-canvas');
+    const photo = fixture.elements.get('#photo');
+    photo.files = [{ type: 'image/jpeg' }];
+    photo.emit('change');
+    fixture.images[0].naturalWidth = 2400;
+    fixture.images[0].naturalHeight = 1600;
+    fixture.images[0].emit('load');
+
+    const singleTouch = { identifier: 1, clientX: 200, clientY: 300 };
+    let singlePrevented = false;
+    const beforeSingleTouch = fixture.drawImageCalls.length;
+    canvas.emit('pointerdown', { pointerType: 'touch', pointerId: 1, clientX: 200, clientY: 300 });
+    canvas.emit('touchstart', { touches: [singleTouch] });
+    canvas.emit('touchmove', {
+      touches: [{ ...singleTouch, clientX: 240 }],
+      preventDefault() { singlePrevented = true; },
+    });
+    assert.equal(singlePrevented, false);
+    assert.equal(fixture.drawImageCalls.length, beforeSingleTouch);
+    assert.equal(canvas.focusCalls, 0);
+    assert.deepEqual(canvas.pointerCaptures, []);
+
+    const firstPair = [
+      { identifier: 1, clientX: 200, clientY: 300 },
+      { identifier: 2, clientX: 300, clientY: 300 },
+    ];
+    canvas.emit('touchstart', { touches: firstPair });
+    let twoTouchPrevented = false;
+    canvas.emit('touchmove', {
+      touches: [
+        { identifier: 1, clientX: 220, clientY: 300 },
+        { identifier: 2, clientX: 320, clientY: 300 },
+      ],
+      preventDefault() { twoTouchPrevented = true; },
+    });
+    assert.equal(twoTouchPrevented, true);
+    assert.equal(fixture.drawImageCalls.at(-1)[1], -860);
+
+    canvas.emit('touchmove', {
+      touches: [
+        { identifier: 1, clientX: 190, clientY: 300 },
+        { identifier: 2, clientX: 350, clientY: 300 },
+      ],
+      preventDefault() {},
+    });
+    assert.equal(fixture.elements.get('#zoom').value, '1.6');
+    assert.equal(fixture.elements.get('#zoom-value').value, '1,60×');
+    assert.equal(fixture.drawImageCalls.at(-1)[1], -1580, 'pinch must remain anchored to the canvas center');
+
+    canvas.emit('touchmove', {
+      touches: [
+        { identifier: 1, clientX: 100, clientY: 300 },
+        { identifier: 2, clientX: 640, clientY: 300 },
+      ],
+      preventDefault() {},
+    });
+    assert.equal(fixture.elements.get('#zoom').value, '3');
+
+    canvas.emit('touchend', { touches: [firstPair[0]] });
+    const afterEnd = fixture.drawImageCalls.length;
+    canvas.emit('touchmove', { touches: [firstPair[0]], preventDefault() { assert.fail('one touch must not block scrolling'); } });
+    assert.equal(fixture.drawImageCalls.length, afterEnd);
+    assert.ok(canvas.listenerOptions.get('touchmove').some((options) => options?.passive === false));
   } finally {
     globalThis.document = originalDocument;
     globalThis.Image = originalImage;

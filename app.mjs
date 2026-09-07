@@ -4,6 +4,7 @@ import {
   computeImagePlacement,
   renderStory,
 } from './story-renderer.mjs';
+import { calculatePinchTransform } from './touch-geometry.mjs';
 
 const form = document.querySelector('#story-form');
 const appShell = document.querySelector('.app-shell');
@@ -39,6 +40,7 @@ const state = {
 };
 
 let activePointer = null;
+let activeTouchGesture = null;
 let imageRequest = 0;
 const DAY_RANGE_ERROR = 'Il giorno deve essere un intero tra 1 e 999 e non può superare i giorni totali.';
 
@@ -55,6 +57,11 @@ if (viewportQuery) {
 
 function setStatus(message) {
   status.textContent = message;
+}
+
+function syncZoomControl() {
+  zoomInput.value = String(state.zoom);
+  zoomValue.value = `${state.zoom.toFixed(2).replace('.', ',')}×`;
 }
 
 function readInteger(input) {
@@ -206,8 +213,7 @@ function loadPhoto(file) {
     state.zoom = 1;
     state.offsetX = 0;
     state.offsetY = 0;
-    zoomInput.value = '1';
-    zoomValue.value = '1,00×';
+    syncZoomControl();
     updateAvailability('Fotografia caricata. Puoi regolare l’inquadratura.');
     redraw();
 
@@ -232,7 +238,64 @@ function moveImage(deltaX, deltaY) {
   redraw();
 }
 
+function getTouchGesture(touches) {
+  if (touches.length !== 2) return null;
+
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
+
+  const scaleX = CANVAS_WIDTH / rect.width;
+  const scaleY = CANVAS_HEIGHT / rect.height;
+  const points = touches.map((touch) => ({
+    x: (touch.clientX - rect.left) * scaleX,
+    y: (touch.clientY - rect.top) * scaleY,
+  }));
+
+  return {
+    centroid: {
+      x: (points[0].x + points[1].x) / 2 - CANVAS_WIDTH / 2,
+      y: (points[0].y + points[1].y) / 2 - CANVAS_HEIGHT / 2,
+    },
+    distance: Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y),
+  };
+}
+
+function resetTouchGesture(touches) {
+  activeTouchGesture = state.image ? getTouchGesture(Array.from(touches)) : null;
+}
+
+function applyTouchGesture(touches) {
+  const currentGesture = getTouchGesture(Array.from(touches));
+  if (!currentGesture) {
+    activeTouchGesture = null;
+    return;
+  }
+
+  if (!activeTouchGesture) {
+    activeTouchGesture = currentGesture;
+    return;
+  }
+
+  const nextState = calculatePinchTransform({
+    zoom: state.zoom,
+    offsetX: state.offsetX,
+    offsetY: state.offsetY,
+    previousCentroid: activeTouchGesture.centroid,
+    currentCentroid: currentGesture.centroid,
+    previousDistance: activeTouchGesture.distance,
+    currentDistance: currentGesture.distance,
+  });
+  state.zoom = nextState.zoom;
+  state.offsetX = nextState.offsetX;
+  state.offsetY = nextState.offsetY;
+  clampOffsets();
+  syncZoomControl();
+  redraw();
+  activeTouchGesture = currentGesture;
+}
+
 function finishPointer(event) {
+  if (event.pointerType === 'touch') return;
   if (!activePointer || event.pointerId !== activePointer.id) return;
 
   if (canvas.hasPointerCapture(event.pointerId)) {
@@ -251,7 +314,7 @@ form.addEventListener('input', (event) => {
 
 zoomInput.addEventListener('input', () => {
   state.zoom = Number.parseFloat(zoomInput.value);
-  zoomValue.value = `${state.zoom.toFixed(2).replace('.', ',')}×`;
+  syncZoomControl();
   clampOffsets();
   redraw();
 });
@@ -260,8 +323,7 @@ recenterButton.addEventListener('click', () => {
   state.zoom = 1;
   state.offsetX = 0;
   state.offsetY = 0;
-  zoomInput.value = '1';
-  zoomValue.value = '1,00×';
+  syncZoomControl();
   redraw();
   updateAvailability(state.image ? 'Fotografia ricentrata.' : 'Carica una fotografia per iniziare.');
 });
@@ -269,6 +331,7 @@ recenterButton.addEventListener('click', () => {
 downloadButton.addEventListener('click', downloadStory);
 
 canvas.addEventListener('pointerdown', (event) => {
+  if (event.pointerType === 'touch') return;
   if (!state.image || activePointer) return;
   activePointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
   canvas.setPointerCapture(event.pointerId);
@@ -276,6 +339,7 @@ canvas.addEventListener('pointerdown', (event) => {
 });
 
 canvas.addEventListener('pointermove', (event) => {
+  if (event.pointerType === 'touch') return;
   if (!activePointer || event.pointerId !== activePointer.id) return;
 
   const scaleX = 1080 / canvas.clientWidth;
@@ -289,6 +353,28 @@ canvas.addEventListener('pointermove', (event) => {
 
 canvas.addEventListener('pointerup', finishPointer);
 canvas.addEventListener('pointercancel', finishPointer);
+
+canvas.addEventListener('touchstart', (event) => {
+  resetTouchGesture(event.touches);
+});
+
+canvas.addEventListener('touchmove', (event) => {
+  if (!state.image || event.touches.length !== 2) {
+    activeTouchGesture = null;
+    return;
+  }
+
+  event.preventDefault();
+  applyTouchGesture(event.touches);
+}, { passive: false });
+
+canvas.addEventListener('touchend', (event) => {
+  resetTouchGesture(event.touches);
+});
+
+canvas.addEventListener('touchcancel', (event) => {
+  resetTouchGesture(event.touches);
+});
 
 canvas.addEventListener('keydown', (event) => {
   const step = event.shiftKey ? 48 : 12;

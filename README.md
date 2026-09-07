@@ -14,8 +14,8 @@ Poi visita [http://localhost:8000](http://localhost:8000).
 
 1. Scegli una fotografia dal dispositivo.
 2. Modifica giorno, giorni totali, titolo e fino a tre osservazioni.
-3. Trascina la foto nell'anteprima con mouse o dito. Con la tastiera, usa le frecce; tieni premuto Maiusc per uno spostamento più ampio.
-4. Regola lo zoom in modo continuo oppure premi **Ricentra** per ripristinare posizione e zoom.
+3. Su desktop, trascina la foto con mouse o penna, usa le frecce (Maiusc per passi più ampi) e regola lo zoom con lo slider continuo.
+4. Su mobile, un dito continua a far scorrere la pagina; usa due dita per spostare e ingrandire/ridurre la foto, tra 1× e 3×. **Ricentra** ripristina sempre posizione e zoom.
 5. Premi **Scarica PNG** per ottenere la stessa composizione mostrata nell'anteprima, in formato 1080 × 1920.
 
 Il download si attiva soltanto dopo il caricamento di una fotografia valida e quando il giorno non supera i giorni totali.
