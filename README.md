@@ -24,6 +24,10 @@ Il download si attiva soltanto dopo il caricamento di una fotografia valida e qu
 
 Foto e testi restano esclusivamente nella memoria del browser: l'app non li invia in rete, non li salva e non li ripristina. Non usa backend, account, cookie, analytics, `localStorage` o altre forme di persistenza. L'unica scrittura avviene quando l'utente avvia il download del PNG.
 
+## Pubblicazione GitHub Pages
+
+Il codice sorgente è disponibile su [GitHub](https://github.com/alessandroorru/ig-travel-story). La versione pubblicata è disponibile su [GitHub Pages](https://alessandroorru.github.io/ig-travel-story/).
+
 ## Test
 
 La suite usa il test runner integrato di Node e non richiede installazione di pacchetti:
