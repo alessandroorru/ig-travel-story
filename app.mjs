@@ -37,6 +37,7 @@ const state = {
 
 let activePointer = null;
 let imageRequest = 0;
+const DAY_RANGE_ERROR = 'Il giorno deve essere un intero tra 1 e 999 e non può superare i giorni totali.';
 
 function setStatus(message) {
   status.textContent = message;
@@ -59,17 +60,21 @@ function hasValidDayRange() {
   );
 }
 
-function updateAvailability() {
+function updateAvailability(statusWhenValid) {
   const validRange = hasValidDayRange();
   dayInput.setAttribute('aria-invalid', String(!validRange));
   totalDaysInput.setAttribute('aria-invalid', String(!validRange));
   downloadButton.disabled = !state.image || !validRange;
 
   if (!validRange) {
-    setStatus('Il giorno deve essere un intero tra 1 e 999 e non può superare i giorni totali.');
-  } else if (!state.image && status.textContent.startsWith('Il giorno')) {
+    setStatus(DAY_RANGE_ERROR);
+  } else if (statusWhenValid !== undefined) {
+    setStatus(statusWhenValid);
+  } else if (status.textContent === DAY_RANGE_ERROR) {
     setStatus('');
   }
+
+  return validRange;
 }
 
 function createPngBlob() {
@@ -93,10 +98,10 @@ async function downloadStory() {
 
   let downloadUrl = null;
   let link = null;
+  const filename = `travel-story-day-${String(state.day).padStart(2, '0')}.png`;
 
   try {
     const blob = await createPngBlob();
-    const filename = `travel-story-day-${String(state.day).padStart(2, '0')}.png`;
     downloadUrl = URL.createObjectURL(blob);
     link = document.createElement('a');
     link.href = downloadUrl;
@@ -189,9 +194,8 @@ function loadPhoto(file) {
     state.offsetY = 0;
     zoomInput.value = '1';
     zoomValue.value = '1,00×';
-    updateAvailability();
+    updateAvailability('Fotografia caricata. Puoi regolare l’inquadratura.');
     redraw();
-    setStatus('Fotografia caricata. Puoi regolare l’inquadratura.');
 
     if (previousUrl) URL.revokeObjectURL(previousUrl);
   }, { once: true });
@@ -245,7 +249,7 @@ recenterButton.addEventListener('click', () => {
   zoomInput.value = '1';
   zoomValue.value = '1,00×';
   redraw();
-  setStatus(state.image ? 'Fotografia ricentrata.' : 'Carica una fotografia per iniziare.');
+  updateAvailability(state.image ? 'Fotografia ricentrata.' : 'Carica una fotografia per iniziare.');
 });
 
 downloadButton.addEventListener('click', downloadStory);

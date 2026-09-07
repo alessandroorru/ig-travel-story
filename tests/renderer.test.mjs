@@ -189,3 +189,47 @@ test('renders each Cinema note with a red dash and white text', () => {
     );
   }
 });
+
+test('keeps blank title newlines as forced vertical lines', () => {
+  const context = createRecordingContext();
+
+  renderStory(context, {
+    image: { width: 1080, height: 1920 },
+    day: 1,
+    totalDays: 28,
+    title: 'First\n\nThird',
+    notes: [],
+  });
+
+  const first = context.calls.find(
+    ([name, value]) => name === 'fillText' && value === 'FIRST',
+  );
+  const third = context.calls.find(
+    ([name, value]) => name === 'fillText' && value === 'THIRD',
+  );
+  assert.equal(first?.[3], 146);
+  assert.equal(third?.[3], 334);
+  assert.ok(!context.calls.some(([name, value]) => name === 'fillText' && value === ''));
+});
+
+test('keeps a trailing blank note newline within the two-line layout', () => {
+  const context = createRecordingContext();
+
+  renderStory(context, {
+    image: { width: 1080, height: 1920 },
+    day: 1,
+    totalDays: 28,
+    title: 'Title',
+    notes: ['First note\n'],
+  });
+
+  const dash = context.calls.find(
+    ([name, value]) => name === 'fillText' && value === '—',
+  );
+  const note = context.calls.find(
+    ([name, value]) => name === 'fillText' && value === 'First note',
+  );
+  assert.equal(dash?.[3], 1740);
+  assert.equal(note?.[3], 1740);
+  assert.ok(!context.calls.some(([name, value]) => name === 'fillText' && value === ''));
+});

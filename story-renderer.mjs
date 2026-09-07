@@ -94,7 +94,7 @@ export function wrapText(text, measure, maxWidth, maxLines) {
   const lines = [];
 
   for (const paragraph of paragraphs) {
-    const words = paragraph.trim().split(/\s+/).filter(Boolean);
+    const words = paragraph.match(/\S+/gu) ?? [];
     if (!words.length) {
       lines.push('');
       continue;
@@ -174,19 +174,20 @@ export function renderStory(context, state) {
   context.fillStyle = WHITE;
   context.font = '800 104px system-ui, sans-serif';
   const measure = (value) => context.measureText(value).width;
-  const titleLines = wrapText(String(state?.title ?? '').toUpperCase(), measure, CANVAS_WIDTH - CANVAS_PADDING * 2, 3)
-    .filter(Boolean);
+  const title = String(state?.title ?? '').toUpperCase();
+  const titleLines = /\S/u.test(title)
+    ? wrapText(title, measure, CANVAS_WIDTH - CANVAS_PADDING * 2, 3)
+    : [];
   titleLines.forEach((line, index) => {
-    context.fillText(line, CANVAS_PADDING, 146 + index * 94);
+    if (line) context.fillText(line, CANVAS_PADDING, 146 + index * 94);
   });
 
   context.font = '540 38px system-ui, sans-serif';
   const noteEntries = (state?.notes ?? [])
-    .map((note) => String(note ?? '').trim())
-    .filter(Boolean)
+    .map((note) => String(note ?? ''))
+    .filter((note) => /\S/u.test(note))
     .slice(0, 3)
-    .map((note) => wrapText(note, measure, CANVAS_WIDTH - CANVAS_PADDING * 2, 2).filter(Boolean))
-    .filter((lines) => lines.length);
+    .map((note) => wrapText(note, measure, CANVAS_WIDTH - CANVAS_PADDING * 2, 2));
 
   let bottom = CANVAS_HEIGHT - CANVAS_PADDING;
   for (const lines of noteEntries.reverse()) {
@@ -195,7 +196,7 @@ export function renderStory(context, state) {
     context.fillText('—', CANVAS_PADDING, bottom);
     context.fillStyle = WHITE;
     for (const [index, line] of lines.entries()) {
-      context.fillText(line, CANVAS_PADDING + 44, bottom + index * 50);
+      if (line) context.fillText(line, CANVAS_PADDING + 44, bottom + index * 50);
     }
     bottom -= 26;
   }

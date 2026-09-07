@@ -395,3 +395,115 @@ test('a rejected file invalidates an earlier image that is still decoding', asyn
     globalThis.URL = originalUrl;
   }
 });
+
+test('day-range validation stays authoritative across photo load and recenter', async () => {
+  const fixture = createAppFixture();
+  const originalDocument = globalThis.document;
+  const originalImage = globalThis.Image;
+  const originalUrl = globalThis.URL;
+  let nextUrl = 0;
+
+  globalThis.document = {
+    querySelector: (selector) => fixture.elements.get(selector),
+  };
+  globalThis.Image = fixture.FakeImage;
+  globalThis.URL = {
+    createObjectURL: () => `blob:test-${++nextUrl}`,
+    revokeObjectURL() {},
+  };
+
+  try {
+    await import(`${appUrl.href}?range-status=${Date.now()}`);
+    const form = fixture.elements.get('#story-form');
+    const photo = fixture.elements.get('#photo');
+    const day = fixture.elements.get('#day');
+    const status = fixture.elements.get('#status');
+    const download = fixture.elements.get('#download');
+
+    day.value = '29';
+    form.emit('input', { target: day });
+    const validationMessage = status.textContent;
+    assert.match(validationMessage, /non può superare i giorni totali/i);
+
+    photo.files = [{ type: 'image/jpeg' }];
+    photo.emit('change');
+    fixture.images[0].emit('load');
+    assert.equal(status.textContent, validationMessage);
+
+    fixture.elements.get('#recenter').emit('click');
+    assert.equal(status.textContent, validationMessage);
+    assert.equal(download.disabled, true);
+
+    day.value = '28';
+    form.emit('input', { target: day });
+    assert.equal(status.textContent, '');
+    assert.equal(download.disabled, false);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.Image = originalImage;
+    globalThis.URL = originalUrl;
+  }
+});
+
+test('uses the day selected when PNG generation starts for the filename', async () => {
+  const fixture = createAppFixture();
+  const originalDocument = globalThis.document;
+  const originalImage = globalThis.Image;
+  const originalUrl = globalThis.URL;
+  const pngBlob = new Blob(['png'], { type: 'image/png' });
+  const anchors = [];
+  let finishBlob;
+  let nextUrl = 0;
+
+  fixture.elements.get('#story-canvas').toBlob = (callback) => {
+    finishBlob = callback;
+  };
+  globalThis.document = {
+    querySelector: (selector) => fixture.elements.get(selector),
+    createElement: () => {
+      const anchor = {
+        href: '',
+        download: '',
+        click() {},
+        remove() {},
+      };
+      anchors.push(anchor);
+      return anchor;
+    },
+    body: { append() {} },
+  };
+  globalThis.Image = fixture.FakeImage;
+  globalThis.URL = {
+    createObjectURL: () => `blob:test-${++nextUrl}`,
+    revokeObjectURL() {},
+  };
+
+  try {
+    await import(`${appUrl.href}?download-day-snapshot=${Date.now()}`);
+    const form = fixture.elements.get('#story-form');
+    const photo = fixture.elements.get('#photo');
+    const day = fixture.elements.get('#day');
+    const download = fixture.elements.get('#download');
+
+    photo.files = [{ type: 'image/jpeg' }];
+    photo.emit('change');
+    fixture.images[0].emit('load');
+    day.value = '7';
+    form.emit('input', { target: day });
+
+    const pendingDownload = Promise.all(download.emit('click'));
+    assert.equal(typeof finishBlob, 'function');
+
+    day.value = '8';
+    form.emit('input', { target: day });
+    finishBlob(pngBlob);
+    await pendingDownload;
+
+    assert.equal(anchors.length, 1);
+    assert.equal(anchors[0].download, 'travel-story-day-07.png');
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.Image = originalImage;
+    globalThis.URL = originalUrl;
+  }
+});
