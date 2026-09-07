@@ -3,56 +3,106 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Tre momenti di Kuala Lumpur in una travel story cinematografica.">
-    <title>Kuala Lumpur — Day 01</title>
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    >
+    <meta
+      name="description"
+      content="Crea una travel story privata nel browser e scaricala in formato Instagram Story."
+    >
+    <title>Travel Story Generator</title>
     <link rel="stylesheet" href="styles.css">
+    <script type="module" src="app.mjs"></script>
   </head>
   <body>
-    <main class="comparison" aria-label="Kuala Lumpur, Day 01">
-      <header class="comparison__intro">
-        <p>Travel story / 01—28</p>
-        <h1>Three frames from a first arrival.</h1>
-      </header>
+    <main class="app-shell">
+      <section class="editor" aria-labelledby="editor-title">
+        <header class="editor__header">
+          <p class="eyebrow">Story studio</p>
+          <h1 id="editor-title">Racconta il viaggio, un giorno alla volta.</h1>
+          <p class="editor__intro">
+            La foto rimane su questo dispositivo. Componi l'inquadratura e scarica il PNG pronto per Instagram.
+          </p>
+        </header>
 
-      <section class="stories" aria-label="Tre momenti di Kuala Lumpur">
-        <article class="story" data-theme="cinema">
-          <img class="story__photo" src="assets/DSCF7347.jpeg" alt="Veduta urbana di Kuala Lumpur">
-          <div class="story__heading">
-            <p class="story__day">Day 01 / 28</p>
-            <h2 class="story__title">Welcome to Kuala Lumpur</h2>
+        <form id="story-form" novalidate>
+          <div class="field field--file">
+            <label for="photo">Fotografia</label>
+            <input id="photo" name="photo" type="file" accept="image/*">
+            <p class="field__hint">JPG, PNG o un altro formato immagine supportato dal browser.</p>
           </div>
-          <ul class="story__notes">
-            <li class="story__note">Tre voli e cinque ore di sonno.</li>
-            <li class="story__note">Il caldo appanna l’obiettivo appena esci.</li>
-            <li class="story__note">Tra palme, templi e insegne, la città cambia faccia a ogni isolato.</li>
-          </ul>
-        </article>
 
-        <article class="story" data-theme="cinema">
-          <img class="story__photo" src="assets/DSCF7335.jpeg" alt="Palme e architettura a Kuala Lumpur">
-          <div class="story__heading">
-            <p class="story__day">Day 01 / 28</p>
-            <h2 class="story__title">Welcome to Kuala Lumpur</h2>
+          <div class="field-row">
+            <div class="field">
+              <label for="day">Giorno</label>
+              <input id="day" name="day" type="number" min="1" max="999" step="1" value="1">
+            </div>
+            <div class="field">
+              <label for="total-days">Giorni totali</label>
+              <input id="total-days" name="total-days" type="number" min="1" max="999" step="1" value="28">
+            </div>
           </div>
-          <ul class="story__notes">
-            <li class="story__note">Tre voli e cinque ore di sonno.</li>
-            <li class="story__note">Il caldo appanna l’obiettivo appena esci.</li>
-            <li class="story__note">Tra palme, templi e insegne, la città cambia faccia a ogni isolato.</li>
-          </ul>
-        </article>
 
-        <article class="story" data-theme="cinema">
-          <img class="story__photo" src="assets/DSCF7341.jpeg" alt="Chiosco di cocchi con una persona a Kuala Lumpur">
-          <div class="story__heading">
-            <p class="story__day">Day 01 / 28</p>
-            <h2 class="story__title">Welcome to Kuala Lumpur</h2>
+          <div class="field">
+            <label for="title">Titolo</label>
+            <input id="title" name="title" type="text" maxlength="42" value="Welcome to Kuala Lumpur">
           </div>
-          <ul class="story__notes">
-            <li class="story__note">Tre voli e cinque ore di sonno.</li>
-            <li class="story__note">Il caldo appanna l’obiettivo appena esci.</li>
-            <li class="story__note">Tra palme, templi e insegne, la città cambia faccia a ogni isolato.</li>
-          </ul>
-        </article>
+
+          <fieldset>
+            <legend>Osservazioni <span>opzionali</span></legend>
+            <div class="field">
+              <label for="note-1">Osservazione 1</label>
+              <textarea id="note-1" name="note-1" maxlength="90" rows="2"></textarea>
+            </div>
+            <div class="field">
+              <label for="note-2">Osservazione 2</label>
+              <textarea id="note-2" name="note-2" maxlength="90" rows="2"></textarea>
+            </div>
+            <div class="field">
+              <label for="note-3">Osservazione 3</label>
+              <textarea id="note-3" name="note-3" maxlength="90" rows="2"></textarea>
+            </div>
+          </fieldset>
+
+          <div class="field field--zoom">
+            <div class="field__heading">
+              <label for="zoom">Zoom</label>
+              <output id="zoom-value" for="zoom">1,00×</output>
+            </div>
+            <input id="zoom" name="zoom" type="range" min="1" max="3" step="0.01" value="1">
+          </div>
+
+          <div class="actions">
+            <button id="recenter" type="button" class="button button--secondary">Ricentra</button>
+            <button id="download" type="button" class="button button--primary" disabled>Scarica PNG</button>
+          </div>
+        </form>
+
+        <p id="status" class="status" aria-live="polite"></p>
+      </section>
+
+      <section class="preview" aria-labelledby="preview-title">
+        <div class="preview__heading">
+          <div>
+            <p class="eyebrow">Anteprima</p>
+            <h2 id="preview-title">1080 × 1920</h2>
+          </div>
+          <p id="canvas-instructions">Trascina la foto o usa i tasti freccia. Tieni premuto Maiusc per spostarla più velocemente.</p>
+        </div>
+        <div class="canvas-frame">
+          <canvas
+            width="1080"
+            height="1920"
+            id="story-canvas"
+            role="img"
+            tabindex="0"
+            aria-label="Anteprima della travel story"
+            aria-describedby="canvas-instructions"
+          >
+            Anteprima della travel story. Carica una fotografia per iniziare.
+          </canvas>
+        </div>
       </section>
     </main>
   </body>
