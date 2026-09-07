@@ -6,6 +6,9 @@ import {
 } from './story-renderer.mjs';
 
 const form = document.querySelector('#story-form');
+const appShell = document.querySelector('.app-shell');
+const editor = document.querySelector('.editor');
+const preview = document.querySelector('.preview');
 const photoInput = document.querySelector('#photo');
 const dayInput = document.querySelector('#day');
 const totalDaysInput = document.querySelector('#total-days');
@@ -27,7 +30,7 @@ const state = {
   image: null,
   imageUrl: null,
   day: 1,
-  totalDays: 28,
+  totalDays: 35,
   title: 'Welcome to Kuala Lumpur',
   notes: ['', '', ''],
   zoom: 1,
@@ -38,6 +41,17 @@ const state = {
 let activePointer = null;
 let imageRequest = 0;
 const DAY_RANGE_ERROR = 'Il giorno deve essere un intero tra 1 e 999 e non può superare i giorni totali.';
+
+function synchronizeResponsiveOrder(isMobile) {
+  if (!appShell || !editor || !preview) return;
+  appShell.insertBefore(isMobile ? preview : editor, isMobile ? editor : preview);
+}
+
+const viewportQuery = globalThis.matchMedia?.('(max-width: 60rem)');
+if (viewportQuery) {
+  synchronizeResponsiveOrder(viewportQuery.matches);
+  viewportQuery.addEventListener?.('change', (event) => synchronizeResponsiveOrder(event.matches));
+}
 
 function setStatus(message) {
   status.textContent = message;

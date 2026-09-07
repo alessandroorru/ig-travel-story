@@ -2,6 +2,12 @@ export const CANVAS_WIDTH = 1080;
 export const CANVAS_HEIGHT = 1920;
 
 const CANVAS_PADDING = 80;
+const TEXT_SAFE_AREA = 250;
+const TEXT_SAFE_OFFSET = TEXT_SAFE_AREA - CANVAS_PADDING;
+const TOP_FADE_START = TEXT_SAFE_OFFSET;
+const TOP_FADE_END = CANVAS_HEIGHT * 0.36 + TEXT_SAFE_OFFSET;
+const BOTTOM_FADE_START = CANVAS_HEIGHT * 0.48 - TEXT_SAFE_OFFSET;
+const BOTTOM_FADE_END = CANVAS_HEIGHT - TEXT_SAFE_OFFSET;
 const RED = '#ff3b30';
 const WHITE = '#f7f7f4';
 const clamp = (value, minimum, maximum) => {
@@ -150,25 +156,30 @@ export function renderStory(context, state) {
     context.drawImage(image, placement.x, placement.y, placement.width, placement.height);
   }
 
-  const topFade = context.createLinearGradient(0, 0, 0, CANVAS_HEIGHT * 0.36);
+  const topFade = context.createLinearGradient(0, TOP_FADE_START, 0, TOP_FADE_END);
   topFade.addColorStop(0, 'rgba(0, 0, 0, 0.76)');
   topFade.addColorStop(1, 'rgba(0, 0, 0, 0)');
   context.fillStyle = topFade;
-  context.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT * 0.36);
+  context.fillRect(0, 0, CANVAS_WIDTH, TOP_FADE_END);
 
-  const bottomFade = context.createLinearGradient(0, CANVAS_HEIGHT * 0.48, 0, CANVAS_HEIGHT);
+  const bottomFade = context.createLinearGradient(0, BOTTOM_FADE_START, 0, BOTTOM_FADE_END);
   bottomFade.addColorStop(0, 'rgba(0, 0, 0, 0)');
   bottomFade.addColorStop(1, 'rgba(0, 0, 0, 0.92)');
   context.fillStyle = bottomFade;
-  context.fillRect(0, CANVAS_HEIGHT * 0.48, CANVAS_WIDTH, CANVAS_HEIGHT * 0.52);
+  context.fillRect(
+    0,
+    BOTTOM_FADE_START,
+    CANVAS_WIDTH,
+    CANVAS_HEIGHT - BOTTOM_FADE_START,
+  );
 
   context.textBaseline = 'top';
   context.fillStyle = RED;
   context.font = '800 34px system-ui, sans-serif';
   context.fillText(
-    `${formatDayValue(state?.day)} / ${formatDayValue(state?.totalDays)}`,
+    `Day ${formatDayValue(state?.day)} / ${formatDayValue(state?.totalDays)}`,
     CANVAS_PADDING,
-    CANVAS_PADDING,
+    TEXT_SAFE_AREA,
   );
 
   context.fillStyle = WHITE;
@@ -179,7 +190,7 @@ export function renderStory(context, state) {
     ? wrapText(title, measure, CANVAS_WIDTH - CANVAS_PADDING * 2, 3)
     : [];
   titleLines.forEach((line, index) => {
-    if (line) context.fillText(line, CANVAS_PADDING, 146 + index * 94);
+    if (line) context.fillText(line, CANVAS_PADDING, TEXT_SAFE_AREA + 66 + index * 94);
   });
 
   context.font = '540 38px system-ui, sans-serif';
@@ -189,7 +200,7 @@ export function renderStory(context, state) {
     .slice(0, 3)
     .map((note) => wrapText(note, measure, CANVAS_WIDTH - CANVAS_PADDING * 2, 2));
 
-  let bottom = CANVAS_HEIGHT - CANVAS_PADDING;
+  let bottom = CANVAS_HEIGHT - TEXT_SAFE_AREA;
   for (const lines of noteEntries.reverse()) {
     bottom -= lines.length * 50;
     context.fillStyle = RED;

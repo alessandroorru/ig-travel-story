@@ -6,6 +6,7 @@ const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
 const appUrl = new URL('../app.mjs', import.meta.url);
 const app = existsSync(appUrl) ? readFileSync(appUrl, 'utf8') : '';
+const renderer = readFileSync(new URL('../story-renderer.mjs', import.meta.url), 'utf8');
 
 function elementWithId(tagName, id) {
   const match = html.match(new RegExp(`<${tagName}\\b[^>]*\\bid=["']${id}["'][^>]*>`, 'i'));
@@ -27,11 +28,11 @@ test('exposes the complete labelled editing form with exact input contracts', ()
   const fields = [
     ['input', 'photo', { type: 'file', accept: 'image/\\*' }],
     ['input', 'day', { type: 'number', min: '1', max: '999', step: '1', value: '1' }],
-    ['input', 'total-days', { type: 'number', min: '1', max: '999', step: '1', value: '28' }],
+    ['input', 'total-days', { type: 'number', min: '1', max: '999', step: '1', value: '35' }],
     ['input', 'title', { type: 'text', maxlength: '42' }],
-    ['textarea', 'note-1', { maxlength: '90' }],
-    ['textarea', 'note-2', { maxlength: '90' }],
-    ['textarea', 'note-3', { maxlength: '90' }],
+    ['textarea', 'note-1', {}],
+    ['textarea', 'note-2', {}],
+    ['textarea', 'note-3', {}],
     ['input', 'zoom', { type: 'range', min: '1', max: '3', step: '0.01', value: '1' }],
   ];
 
@@ -44,8 +45,47 @@ test('exposes the complete labelled editing form with exact input contracts', ()
   }
 
   assert.match(elementWithId('input', 'title'), /value=["']Welcome to Kuala Lumpur["']/);
+  for (const id of ['note-1', 'note-2', 'note-3']) {
+    assert.doesNotMatch(elementWithId('textarea', id), /\bmaxlength=/i);
+  }
   assert.match(elementWithId('button', 'recenter'), /type=["']button["']/);
   assert.match(elementWithId('button', 'download'), /type=["']button["'][^>]*\bdisabled\b/);
+});
+
+test('keeps the concise editor header and places composition controls below the photo upload', () => {
+  const editorTitle = elementWithId('h2', 'editor-title');
+  assertAttribute(editorTitle, 'class', 'eyebrow');
+  assert.match(html, /<h2[^>]*\bid=["']editor-title["'][^>]*>\s*Story studio\s*<\/h2>/i);
+  assert.doesNotMatch(html, /Racconta il viaggio, un giorno alla volta\./i);
+  assert.match(html, /La foto rimane su questo dispositivo/i);
+
+  const photoIndex = html.indexOf('id="photo"');
+  const zoomIndex = html.indexOf('id="zoom"');
+  const recenterIndex = html.indexOf('id="recenter"');
+  const dayIndex = html.indexOf('id="day"');
+  assert.ok(photoIndex < zoomIndex, 'zoom must follow the photo upload');
+  assert.ok(zoomIndex < recenterIndex, 'recenter must remain with zoom controls');
+  assert.ok(recenterIndex < dayIndex, 'zoom controls must precede the day fields');
+});
+
+test('provides a global hidden h1 before the responsive h2 sections', () => {
+  const globalTitle = html.match(/<h1\s+class=["']visually-hidden["']>Travel Story Generator<\/h1>/i);
+  assert.ok(globalTitle, 'missing visually-hidden global h1');
+
+  const mainStart = html.indexOf('<main class="app-shell">');
+  const globalTitleIndex = html.indexOf(globalTitle[0]);
+  const editorTitleIndex = html.indexOf('id="editor-title"');
+  const previewTitleIndex = html.indexOf('id="preview-title"');
+  assert.ok(mainStart < globalTitleIndex, 'global h1 must be the first main child');
+  assert.ok(globalTitleIndex < editorTitleIndex, 'global h1 must precede editor h2');
+  assert.ok(globalTitleIndex < previewTitleIndex, 'global h1 must precede preview h2');
+  assert.match(html, /<h2[^>]*\bid=["']preview-title["'][^>]*>1080 × 1920<\/h2>/);
+
+  const hiddenStyles = css.match(/\.visually-hidden\s*\{([^}]*)\}/s)?.[1] ?? '';
+  assert.match(hiddenStyles, /\bposition:\s*absolute\b/);
+  assert.match(hiddenStyles, /\boverflow:\s*hidden\b/);
+  assert.match(hiddenStyles, /\bclip:/);
+  assert.doesNotMatch(hiddenStyles, /\bdisplay\s*:\s*none\b/);
 });
 
 test('provides an accessible 1080 by 1920 preview and live status', () => {
@@ -60,6 +100,40 @@ test('provides an accessible 1080 by 1920 preview and live status', () => {
   const status = elementWithId('p', 'status');
   assertAttribute(status, 'aria-live', 'polite');
   assert.match(html, /id=["']canvas-instructions["'][^>]*>[\s\S]*trascin/i);
+});
+
+test('layers a non-interactive preview-only story overlay above the canvas', () => {
+  const stage = html.match(/<div class=["']canvas-stage["']>([\s\S]*?)<\/div>\s*<\/section>/i);
+  assert.ok(stage, 'missing canvas stage');
+  assert.ok(stage[1].indexOf('id="story-canvas"') < stage[1].indexOf('id="instagram-preview-overlay"'));
+
+  const overlay = elementWithId('svg', 'instagram-preview-overlay');
+  assertAttribute(overlay, 'viewBox', '0 0 1080 1920');
+  assertAttribute(overlay, 'aria-hidden', 'true');
+  assertAttribute(overlay, 'focusable', 'false');
+  assert.match(overlay, /class=["']instagram-preview-overlay["']/);
+  assert.match(html, /<rect\s+x=["']20["']\s+y=["']20["']\s+width=["']1040["']\s+height=["']5["']\s+rx=["']2\.5["']/i);
+  assert.match(html, /<rect\s+x=["']20["']\s+y=["']20["']\s+width=["']645["']\s+height=["']5["']\s+rx=["']2\.5["']/i);
+  assert.match(
+    html,
+    /<text\s+x=["']135["']\s+y=["']94["'][^>]*font-size=["']32["']\s+font-weight=["']700["'][^>]*>La tua storia<\/text>/i,
+  );
+  assert.match(
+    html,
+    /<text\s+x=["']351["']\s+y=["']94["'][^>]*font-size=["']32["']\s+font-weight=["']400["'][^>]*opacity=["']\.78["'][^>]*>12 s<\/text>/i,
+  );
+  assert.match(html, />Rispondi</);
+
+  const stageStyles = css.match(/\.canvas-stage\s*\{([^}]*)\}/s)?.[1] ?? '';
+  const canvasStyles = css.match(/#story-canvas\s*\{([^}]*)\}/s)?.[1] ?? '';
+  assert.match(stageStyles, /\bposition:\s*relative\b/);
+  assert.match(stageStyles, /\baspect-ratio:\s*9\s*\/\s*16\b/);
+  assert.match(stageStyles, /\bbox-shadow:/);
+  assert.doesNotMatch(stageStyles, /\boverflow:/);
+  assert.doesNotMatch(canvasStyles, /\bbox-shadow:/);
+  assert.match(css, /\.instagram-preview-overlay\s*\{[^}]*\bposition:\s*absolute\b[^}]*\binset:\s*0\b[^}]*\bz-index:\s*2\b[^}]*\boverflow:\s*hidden\b[^}]*\bpointer-events:\s*none\b/s);
+  assert.doesNotMatch(renderer, /overlay/i);
+  assert.doesNotMatch(app, /instagram-preview-overlay/i);
 });
 
 test('loads only local app assets under a network-blocking content policy', () => {
@@ -105,6 +179,16 @@ test('uses responsive local styling with visible focus and canvas-only gesture c
   assert.doesNotMatch(css, /@import|url\s*\(/i);
 });
 
+test('keeps editor first in the base DOM without visual reordering CSS', () => {
+  assert.ok(
+    html.indexOf('<section class="editor"') < html.indexOf('<section class="preview"'),
+    'desktop reading and tab order must reach the editor before the preview',
+  );
+  assert.doesNotMatch(css, /\.editor\s*\{[^}]*\bgrid-(?:column|row):/s);
+  assert.doesNotMatch(css, /\.preview\s*\{[^}]*\bgrid-(?:column|row):/s);
+  assert.doesNotMatch(css, /\border\s*:/);
+});
+
 test('keeps PNG export unavailable in markup until a valid photo is loaded', () => {
   assert.match(elementWithId('button', 'download'), /\bdisabled\b/);
 });
@@ -137,23 +221,44 @@ class FakeElement {
   hasPointerCapture() { return false; }
 }
 
+class FakeContainer extends FakeElement {
+  constructor(children) {
+    super();
+    this.children = [...children];
+  }
+
+  insertBefore(node, referenceNode) {
+    const currentIndex = this.children.indexOf(node);
+    if (currentIndex >= 0) this.children.splice(currentIndex, 1);
+    const referenceIndex = this.children.indexOf(referenceNode);
+    this.children.splice(referenceIndex < 0 ? this.children.length : referenceIndex, 0, node);
+  }
+}
+
 function createAppFixture() {
   const drawImageCalls = [];
+  const textCalls = [];
   const context = {
     clearRect() {},
     fillRect() {},
     strokeRect() {},
     setLineDash() {},
-    fillText() {},
+    fillText(...args) { textCalls.push(args); },
     drawImage(...args) { drawImageCalls.push(args); },
     createLinearGradient() { return { addColorStop() {} }; },
     measureText(value) { return { width: [...value].length * 20 }; },
   };
+  const editor = new FakeElement();
+  const preview = new FakeElement();
+  const appShell = new FakeContainer([editor, preview]);
   const elements = new Map([
+    ['.app-shell', appShell],
+    ['.editor', editor],
+    ['.preview', preview],
     ['#story-form', new FakeElement()],
     ['#photo', new FakeElement()],
     ['#day', new FakeElement('1')],
-    ['#total-days', new FakeElement('28')],
+    ['#total-days', new FakeElement('35')],
     ['#title', new FakeElement('Welcome to Kuala Lumpur')],
     ['#note-1', new FakeElement()],
     ['#note-2', new FakeElement()],
@@ -180,8 +285,97 @@ function createAppFixture() {
     }
   }
 
-  return { context, drawImageCalls, elements, images, FakeImage };
+  return {
+    context,
+    drawImageCalls,
+    elements,
+    images,
+    FakeImage,
+    textCalls,
+    appShell,
+    editor,
+    preview,
+  };
 }
+
+test('synchronizes the DOM order with mobile media changes', async () => {
+  const fixture = createAppFixture();
+  const originalDocument = globalThis.document;
+  const originalImage = globalThis.Image;
+  const originalUrl = globalThis.URL;
+  const originalMatchMedia = globalThis.matchMedia;
+  let changeListener;
+  const mediaQuery = {
+    matches: true,
+    addEventListener(type, listener) {
+      assert.equal(type, 'change');
+      changeListener = listener;
+    },
+  };
+
+  globalThis.document = {
+    querySelector: (selector) => fixture.elements.get(selector),
+  };
+  globalThis.Image = fixture.FakeImage;
+  globalThis.URL = { createObjectURL() {}, revokeObjectURL() {} };
+  globalThis.matchMedia = (query) => {
+    assert.equal(query, '(max-width: 60rem)');
+    return mediaQuery;
+  };
+
+  try {
+    await import(`${appUrl.href}?responsive-order=${Date.now()}`);
+    assert.deepEqual(fixture.appShell.children, [fixture.preview, fixture.editor]);
+
+    changeListener({ matches: false });
+    assert.deepEqual(fixture.appShell.children, [fixture.editor, fixture.preview]);
+
+    changeListener({ matches: true });
+    assert.deepEqual(fixture.appShell.children, [fixture.preview, fixture.editor]);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.Image = originalImage;
+    globalThis.URL = originalUrl;
+    globalThis.matchMedia = originalMatchMedia;
+  }
+});
+
+test('uses the markup defaults in the first rendered story', async () => {
+  const fixture = createAppFixture();
+  const originalDocument = globalThis.document;
+  const originalImage = globalThis.Image;
+  const originalUrl = globalThis.URL;
+  let nextUrl = 0;
+
+  globalThis.document = {
+    querySelector: (selector) => fixture.elements.get(selector),
+    createElement: () => assert.fail('must not create elements while rendering the initial story'),
+    body: { append: () => assert.fail('must not append elements while rendering the initial story') },
+  };
+  globalThis.Image = fixture.FakeImage;
+  globalThis.URL = {
+    createObjectURL: () => `blob:test-${++nextUrl}`,
+    revokeObjectURL() {},
+  };
+
+  try {
+    await import(`${appUrl.href}?default-story=${Date.now()}`);
+    const photo = fixture.elements.get('#photo');
+    photo.files = [{ type: 'image/jpeg' }];
+    photo.emit('change');
+    fixture.images[0].emit('load');
+
+    assert.equal(fixture.drawImageCalls.length, 1, 'must draw the loaded image');
+    assert.ok(
+      fixture.textCalls.some(([value]) => value === 'Day 01 / 35'),
+      'the first render must use the 35-day default',
+    );
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.Image = originalImage;
+    globalThis.URL = originalUrl;
+  }
+});
 
 test('downloads the visible canvas as a named PNG and cleans up its object URL', async () => {
   const fixture = createAppFixture();
@@ -420,7 +614,7 @@ test('day-range validation stays authoritative across photo load and recenter', 
     const status = fixture.elements.get('#status');
     const download = fixture.elements.get('#download');
 
-    day.value = '29';
+    day.value = '36';
     form.emit('input', { target: day });
     const validationMessage = status.textContent;
     assert.match(validationMessage, /non può superare i giorni totali/i);
@@ -434,7 +628,7 @@ test('day-range validation stays authoritative across photo load and recenter', 
     assert.equal(status.textContent, validationMessage);
     assert.equal(download.disabled, true);
 
-    day.value = '28';
+    day.value = '35';
     form.emit('input', { target: day });
     assert.equal(status.textContent, '');
     assert.equal(download.disabled, false);

@@ -118,7 +118,7 @@ test('renders only non-empty notes beneath the Cinema title and day', () => {
     offsetX: 0,
     offsetY: 0,
     day: 1,
-    totalDays: 28,
+    totalDays: 35,
     title: 'Welcome to Kuala Lumpur',
     notes: ['First note', '   ', '', 'Second note'],
   });
@@ -130,7 +130,7 @@ test('renders only non-empty notes beneath the Cinema title and day', () => {
   const text = context.calls
     .filter(([name]) => name === 'fillText')
     .map(([, value]) => value);
-  assert.ok(text.includes('01 / 28'));
+  assert.ok(text.includes('Day 01 / 35'));
   assert.ok(text.includes('WELCOME TO KUALA'));
   assert.ok(text.includes('LUMPUR'));
   assert.ok(text.includes('First note'));
@@ -207,8 +207,8 @@ test('keeps blank title newlines as forced vertical lines', () => {
   const third = context.calls.find(
     ([name, value]) => name === 'fillText' && value === 'THIRD',
   );
-  assert.equal(first?.[3], 146);
-  assert.equal(third?.[3], 334);
+  assert.equal(first?.[3], 316);
+  assert.equal(third?.[3], 504);
   assert.ok(!context.calls.some(([name, value]) => name === 'fillText' && value === ''));
 });
 
@@ -229,7 +229,72 @@ test('keeps a trailing blank note newline within the two-line layout', () => {
   const note = context.calls.find(
     ([name, value]) => name === 'fillText' && value === 'First note',
   );
-  assert.equal(dash?.[3], 1740);
-  assert.equal(note?.[3], 1740);
+  assert.equal(dash?.[3], 1570);
+  assert.equal(note?.[3], 1570);
   assert.ok(!context.calls.some(([name, value]) => name === 'fillText' && value === ''));
+});
+
+test('keeps all story text inside the 250-pixel vertical safe areas', () => {
+  const context = createRecordingContext();
+
+  renderStory(context, {
+    image: { width: 1080, height: 1920 },
+    day: 1,
+    totalDays: 35,
+    title: 'Welcome to Kuala Lumpur',
+    notes: ['First note', 'Second note', 'Third note'],
+  });
+
+  const textCalls = context.calls.filter(([name]) => name === 'fillText');
+  const day = textCalls.find(([, value]) => value === 'Day 01 / 35');
+  const title = textCalls.find(([, value]) => value === 'WELCOME TO KUALA');
+  const noteCalls = textCalls.filter(([, value]) => /note/i.test(value));
+
+  assert.equal(day?.[3], 250);
+  assert.equal(title?.[3], 316);
+  assert.ok(noteCalls.length > 0);
+  assert.ok(noteCalls.every(([, , , y]) => y <= 1670));
+});
+
+test('translates the fades by the safe-area offset while preserving their profile', () => {
+  const context = createRecordingContext();
+
+  renderStory(context, {
+    image: { width: 1080, height: 1920 },
+    day: 1,
+    totalDays: 35,
+    title: 'Title',
+    notes: [],
+  });
+
+  assert.deepEqual(context.gradients[0].args, [0, 170, 0, CANVAS_HEIGHT * 0.36 + 170]);
+  assert.deepEqual(context.gradients[0].stops, [
+    [0, 'rgba(0, 0, 0, 0.76)'],
+    [1, 'rgba(0, 0, 0, 0)'],
+  ]);
+  assert.deepEqual(context.gradients[1].args, [
+    0,
+    CANVAS_HEIGHT * 0.48 - 170,
+    0,
+    CANVAS_HEIGHT - 170,
+  ]);
+  assert.deepEqual(context.gradients[1].stops, [
+    [0, 'rgba(0, 0, 0, 0)'],
+    [1, 'rgba(0, 0, 0, 0.92)'],
+  ]);
+  const fadeRects = context.calls.filter(([name]) => name === 'fillRect');
+  assert.deepEqual(fadeRects[0], [
+    'fillRect',
+    0,
+    0,
+    CANVAS_WIDTH,
+    CANVAS_HEIGHT * 0.36 + 170,
+  ]);
+  assert.deepEqual(fadeRects[1], [
+    'fillRect',
+    0,
+    CANVAS_HEIGHT * 0.48 - 170,
+    CANVAS_WIDTH,
+    CANVAS_HEIGHT - (CANVAS_HEIGHT * 0.48 - 170),
+  ]);
 });
