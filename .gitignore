@@ -1,0 +1,9 @@
+.worktrees/
+.superpowers/
+
+# Personal photographs and generated previews stay local.
+assets/
+*.png
+
+# Local tooling.
+.DS_Store
