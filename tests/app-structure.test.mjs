@@ -285,7 +285,7 @@ test('reports a null PNG blob and leaves export available for retry', async () =
 
     assert.equal(
       fixture.elements.get('#status').textContent,
-      'Impossibile creare il PNG. Riprova con un’altra immagine.',
+      "Impossibile creare il PNG. Riprova con un'altra immagine.",
     );
     assert.equal(download.disabled, false);
   } finally {
@@ -339,7 +339,7 @@ test('reports a failed download, cleans up and keeps export enabled', async () =
 
     assert.equal(
       fixture.elements.get('#status').textContent,
-      'Impossibile creare il PNG. Riprova con un’altra immagine.',
+      "Impossibile creare il PNG. Riprova con un'altra immagine.",
     );
     assert.equal(download.disabled, false);
     assert.equal(anchors[0].removed, true);

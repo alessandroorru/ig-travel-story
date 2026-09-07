@@ -105,7 +105,7 @@ async function downloadStory() {
     link.click();
     setStatus(`PNG scaricato: ${filename}`);
   } catch {
-    setStatus('Impossibile creare il PNG. Riprova con un’altra immagine.');
+    setStatus("Impossibile creare il PNG. Riprova con un'altra immagine.");
   } finally {
     link?.remove();
     if (downloadUrl) URL.revokeObjectURL(downloadUrl);
