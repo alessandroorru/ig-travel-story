@@ -191,8 +191,11 @@ export function renderStory(context, state) {
   let bottom = CANVAS_HEIGHT - CANVAS_PADDING;
   for (const lines of noteEntries.reverse()) {
     bottom -= lines.length * 50;
+    context.fillStyle = RED;
+    context.fillText('—', CANVAS_PADDING, bottom);
+    context.fillStyle = WHITE;
     for (const [index, line] of lines.entries()) {
-      context.fillText(line, CANVAS_PADDING, bottom + index * 50);
+      context.fillText(line, CANVAS_PADDING + 44, bottom + index * 50);
     }
     bottom -= 26;
   }

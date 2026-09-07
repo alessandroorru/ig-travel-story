@@ -26,7 +26,9 @@ function createRecordingContext() {
     clearRect: (...args) => calls.push(['clearRect', ...args]),
     drawImage: (...args) => calls.push(['drawImage', ...args]),
     fillRect: (...args) => calls.push(['fillRect', ...args]),
-    fillText: (...args) => calls.push(['fillText', ...args]),
+    fillText(...args) {
+      calls.push(['fillText', ...args, this.fillStyle]);
+    },
     measureText(value) {
       const characterWidth = this.font.includes('104px') ? 56 : 20;
       return { width: [...value].length * characterWidth };
@@ -153,4 +155,37 @@ test('measures notes with the note typeface before wrapping them', () => {
     .filter(([name]) => name === 'fillText')
     .map(([, value]) => value);
   assert.ok(text.includes(note));
+});
+
+test('renders each Cinema note with a red dash and white text', () => {
+  const context = createRecordingContext();
+  const notes = ['First note', 'Second note'];
+
+  renderStory(context, {
+    image: { width: 1080, height: 1920 },
+    day: 1,
+    totalDays: 28,
+    title: 'Title',
+    notes,
+  });
+
+  for (const note of notes) {
+    const noteCall = context.calls.find(
+      ([name, value]) => name === 'fillText' && value === note,
+    );
+    assert.ok(noteCall, `missing white note text for ${note}`);
+    assert.equal(noteCall[4], '#f7f7f4');
+    assert.ok(
+      context.calls.some(
+        ([name, value, x, y, color]) => (
+          name === 'fillText'
+          && value === '—'
+          && x === 80
+          && y === noteCall[3]
+          && color === '#ff3b30'
+        ),
+      ),
+      `missing red dash for ${note}`,
+    );
+  }
 });
