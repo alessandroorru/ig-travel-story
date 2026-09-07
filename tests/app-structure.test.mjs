@@ -105,11 +105,8 @@ test('uses responsive local styling with visible focus and canvas-only gesture c
   assert.doesNotMatch(css, /@import|url\s*\(/i);
 });
 
-test('keeps PNG export unavailable until the download task implements it', () => {
+test('keeps PNG export unavailable in markup until a valid photo is loaded', () => {
   assert.match(elementWithId('button', 'download'), /\bdisabled\b/);
-  assert.doesNotMatch(app, /canvas\.toBlob\(/);
-  assert.doesNotMatch(app, /downloadButton\.addEventListener\(['"]click['"]/);
-  assert.doesNotMatch(app, /downloadButton\.disabled\s*=/);
 });
 
 class FakeElement {
@@ -128,9 +125,9 @@ class FakeElement {
   }
 
   emit(type, event = {}) {
-    for (const listener of this.listeners.get(type) ?? []) {
-      listener({ target: this, ...event });
-    }
+    return (this.listeners.get(type) ?? []).map((listener) => (
+      listener({ target: this, ...event })
+    ));
   }
 
   setAttribute() {}
@@ -185,6 +182,174 @@ function createAppFixture() {
 
   return { context, drawImageCalls, elements, images, FakeImage };
 }
+
+test('downloads the visible canvas as a named PNG and cleans up its object URL', async () => {
+  const fixture = createAppFixture();
+  const originalDocument = globalThis.document;
+  const originalImage = globalThis.Image;
+  const originalUrl = globalThis.URL;
+  const appended = [];
+  const revokedUrls = [];
+  const anchors = [];
+  const pngBlob = new Blob(['png'], { type: 'image/png' });
+  let requestedType = null;
+  let nextUrl = 0;
+
+  fixture.elements.get('#story-canvas').toBlob = (callback, type) => {
+    requestedType = type;
+    callback(pngBlob);
+  };
+
+  globalThis.document = {
+    querySelector: (selector) => fixture.elements.get(selector),
+    createElement: (tagName) => {
+      assert.equal(tagName, 'a');
+      const anchor = {
+        href: '',
+        download: '',
+        clicked: false,
+        removed: false,
+        click() { this.clicked = true; },
+        remove() { this.removed = true; },
+      };
+      anchors.push(anchor);
+      return anchor;
+    },
+    body: { append: (element) => appended.push(element) },
+  };
+  globalThis.Image = fixture.FakeImage;
+  globalThis.URL = {
+    createObjectURL: () => `blob:test-${++nextUrl}`,
+    revokeObjectURL: (url) => revokedUrls.push(url),
+  };
+
+  try {
+    await import(`${appUrl.href}?download-success=${Date.now()}`);
+    const photo = fixture.elements.get('#photo');
+    const day = fixture.elements.get('#day');
+    const download = fixture.elements.get('#download');
+
+    photo.files = [{ type: 'image/jpeg' }];
+    photo.emit('change');
+    fixture.images[0].emit('load');
+    day.value = '7';
+    fixture.elements.get('#story-form').emit('input', { target: day });
+
+    assert.equal(download.disabled, false);
+    await Promise.all(download.emit('click'));
+
+    assert.equal(requestedType, 'image/png');
+    assert.equal(anchors.length, 1);
+    assert.equal(anchors[0].href, 'blob:test-2');
+    assert.equal(anchors[0].download, 'travel-story-day-07.png');
+    assert.equal(anchors[0].clicked, true);
+    assert.equal(anchors[0].removed, true);
+    assert.deepEqual(appended, anchors);
+    assert.deepEqual(revokedUrls, ['blob:test-2']);
+    assert.match(fixture.elements.get('#status').textContent, /PNG scaricato/i);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.Image = originalImage;
+    globalThis.URL = originalUrl;
+  }
+});
+
+test('reports a null PNG blob and leaves export available for retry', async () => {
+  const fixture = createAppFixture();
+  const originalDocument = globalThis.document;
+  const originalImage = globalThis.Image;
+  const originalUrl = globalThis.URL;
+  let nextUrl = 0;
+
+  fixture.elements.get('#story-canvas').toBlob = (callback) => callback(null);
+  globalThis.document = {
+    querySelector: (selector) => fixture.elements.get(selector),
+    createElement: () => assert.fail('must not create a download link for a null blob'),
+    body: { append: () => assert.fail('must not append a download link for a null blob') },
+  };
+  globalThis.Image = fixture.FakeImage;
+  globalThis.URL = {
+    createObjectURL: () => `blob:test-${++nextUrl}`,
+    revokeObjectURL() {},
+  };
+
+  try {
+    await import(`${appUrl.href}?download-null=${Date.now()}`);
+    const photo = fixture.elements.get('#photo');
+    const download = fixture.elements.get('#download');
+    photo.files = [{ type: 'image/jpeg' }];
+    photo.emit('change');
+    fixture.images[0].emit('load');
+
+    await Promise.all(download.emit('click'));
+
+    assert.equal(
+      fixture.elements.get('#status').textContent,
+      'Impossibile creare il PNG. Riprova con un’altra immagine.',
+    );
+    assert.equal(download.disabled, false);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.Image = originalImage;
+    globalThis.URL = originalUrl;
+  }
+});
+
+test('reports a failed download, cleans up and keeps export enabled', async () => {
+  const fixture = createAppFixture();
+  const originalDocument = globalThis.document;
+  const originalImage = globalThis.Image;
+  const originalUrl = globalThis.URL;
+  const revokedUrls = [];
+  const anchors = [];
+  const pngBlob = new Blob(['png'], { type: 'image/png' });
+  let nextUrl = 0;
+
+  fixture.elements.get('#story-canvas').toBlob = (callback) => callback(pngBlob);
+  globalThis.document = {
+    querySelector: (selector) => fixture.elements.get(selector),
+    createElement: () => {
+      const anchor = {
+        href: '',
+        download: '',
+        removed: false,
+        click() { throw new Error('download blocked'); },
+        remove() { this.removed = true; },
+      };
+      anchors.push(anchor);
+      return anchor;
+    },
+    body: { append() {} },
+  };
+  globalThis.Image = fixture.FakeImage;
+  globalThis.URL = {
+    createObjectURL: () => `blob:test-${++nextUrl}`,
+    revokeObjectURL: (url) => revokedUrls.push(url),
+  };
+
+  try {
+    await import(`${appUrl.href}?download-error=${Date.now()}`);
+    const photo = fixture.elements.get('#photo');
+    const download = fixture.elements.get('#download');
+    photo.files = [{ type: 'image/jpeg' }];
+    photo.emit('change');
+    fixture.images[0].emit('load');
+
+    await Promise.all(download.emit('click'));
+
+    assert.equal(
+      fixture.elements.get('#status').textContent,
+      'Impossibile creare il PNG. Riprova con un’altra immagine.',
+    );
+    assert.equal(download.disabled, false);
+    assert.equal(anchors[0].removed, true);
+    assert.deepEqual(revokedUrls, ['blob:test-2']);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.Image = originalImage;
+    globalThis.URL = originalUrl;
+  }
+});
 
 test('a rejected file invalidates an earlier image that is still decoding', async () => {
   const fixture = createAppFixture();

@@ -18,6 +18,7 @@ const noteInputs = [
 const zoomInput = document.querySelector('#zoom');
 const zoomValue = document.querySelector('#zoom-value');
 const recenterButton = document.querySelector('#recenter');
+const downloadButton = document.querySelector('#download');
 const status = document.querySelector('#status');
 const canvas = document.querySelector('#story-canvas');
 const context = canvas.getContext('2d');
@@ -62,11 +63,52 @@ function updateAvailability() {
   const validRange = hasValidDayRange();
   dayInput.setAttribute('aria-invalid', String(!validRange));
   totalDaysInput.setAttribute('aria-invalid', String(!validRange));
+  downloadButton.disabled = !state.image || !validRange;
 
   if (!validRange) {
     setStatus('Il giorno deve essere un intero tra 1 e 999 e non può superare i giorni totali.');
   } else if (!state.image && status.textContent.startsWith('Il giorno')) {
     setStatus('');
+  }
+}
+
+function createPngBlob() {
+  return new Promise((resolve, reject) => {
+    try {
+      canvas.toBlob((blob) => {
+        if (blob) {
+          resolve(blob);
+        } else {
+          reject(new Error('Canvas returned an empty PNG blob.'));
+        }
+      }, 'image/png');
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+async function downloadStory() {
+  if (downloadButton.disabled) return;
+
+  let downloadUrl = null;
+  let link = null;
+
+  try {
+    const blob = await createPngBlob();
+    const filename = `travel-story-day-${String(state.day).padStart(2, '0')}.png`;
+    downloadUrl = URL.createObjectURL(blob);
+    link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    setStatus(`PNG scaricato: ${filename}`);
+  } catch {
+    setStatus('Impossibile creare il PNG. Riprova con un’altra immagine.');
+  } finally {
+    link?.remove();
+    if (downloadUrl) URL.revokeObjectURL(downloadUrl);
   }
 }
 
@@ -205,6 +247,8 @@ recenterButton.addEventListener('click', () => {
   redraw();
   setStatus(state.image ? 'Fotografia ricentrata.' : 'Carica una fotografia per iniziare.');
 });
+
+downloadButton.addEventListener('click', downloadStory);
 
 canvas.addEventListener('pointerdown', (event) => {
   if (!state.image || activePointer) return;
