@@ -18,7 +18,6 @@ const noteInputs = [
 const zoomInput = document.querySelector('#zoom');
 const zoomValue = document.querySelector('#zoom-value');
 const recenterButton = document.querySelector('#recenter');
-const downloadButton = document.querySelector('#download');
 const status = document.querySelector('#status');
 const canvas = document.querySelector('#story-canvas');
 const context = canvas.getContext('2d');
@@ -63,7 +62,6 @@ function updateAvailability() {
   const validRange = hasValidDayRange();
   dayInput.setAttribute('aria-invalid', String(!validRange));
   totalDaysInput.setAttribute('aria-invalid', String(!validRange));
-  downloadButton.disabled = !state.image || !validRange;
 
   if (!validRange) {
     setStatus('Il giorno deve essere un intero tra 1 e 999 e non può superare i giorni totali.');
@@ -125,13 +123,13 @@ function updateTextState() {
 }
 
 function loadPhoto(file) {
+  const request = ++imageRequest;
   if (!file) return;
   if (!file.type.startsWith('image/')) {
     setStatus('Scegli un file immagine valido. L’anteprima precedente non è stata modificata.');
     return;
   }
 
-  const request = ++imageRequest;
   const nextUrl = URL.createObjectURL(file);
   const nextImage = new Image();
 
@@ -243,40 +241,6 @@ canvas.addEventListener('keydown', (event) => {
 
   event.preventDefault();
   moveImage(...movement);
-});
-
-function reportDownloadError() {
-  setStatus('Impossibile creare il PNG. Riprova con un’altra immagine.');
-}
-
-downloadButton.addEventListener('click', () => {
-  updateTextState();
-  if (!state.image || !hasValidDayRange()) return;
-
-  try {
-    canvas.toBlob((blob) => {
-      if (!blob) {
-        reportDownloadError();
-        return;
-      }
-
-      const downloadUrl = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.download = `travel-story-day-${String(state.day).padStart(2, '0')}.png`;
-
-      try {
-        link.click();
-        setStatus('PNG creato: il download è iniziato.');
-      } catch {
-        reportDownloadError();
-      } finally {
-        URL.revokeObjectURL(downloadUrl);
-      }
-    }, 'image/png');
-  } catch {
-    reportDownloadError();
-  }
 });
 
 updateAvailability();

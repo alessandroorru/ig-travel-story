@@ -104,3 +104,129 @@ test('uses responsive local styling with visible focus and canvas-only gesture c
   assert.equal((css.match(/touch-action:\s*none/g) ?? []).length, 1);
   assert.doesNotMatch(css, /@import|url\s*\(/i);
 });
+
+test('keeps PNG export unavailable until the download task implements it', () => {
+  assert.match(elementWithId('button', 'download'), /\bdisabled\b/);
+  assert.doesNotMatch(app, /canvas\.toBlob\(/);
+  assert.doesNotMatch(app, /downloadButton\.addEventListener\(['"]click['"]/);
+  assert.doesNotMatch(app, /downloadButton\.disabled\s*=/);
+});
+
+class FakeElement {
+  constructor(value = '') {
+    this.value = value;
+    this.files = [];
+    this.disabled = true;
+    this.textContent = '';
+    this.listeners = new Map();
+  }
+
+  addEventListener(type, listener) {
+    const listeners = this.listeners.get(type) ?? [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  emit(type, event = {}) {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener({ target: this, ...event });
+    }
+  }
+
+  setAttribute() {}
+  focus() {}
+  setPointerCapture() {}
+  releasePointerCapture() {}
+  hasPointerCapture() { return false; }
+}
+
+function createAppFixture() {
+  const drawImageCalls = [];
+  const context = {
+    clearRect() {},
+    fillRect() {},
+    strokeRect() {},
+    setLineDash() {},
+    fillText() {},
+    drawImage(...args) { drawImageCalls.push(args); },
+    createLinearGradient() { return { addColorStop() {} }; },
+    measureText(value) { return { width: [...value].length * 20 }; },
+  };
+  const elements = new Map([
+    ['#story-form', new FakeElement()],
+    ['#photo', new FakeElement()],
+    ['#day', new FakeElement('1')],
+    ['#total-days', new FakeElement('28')],
+    ['#title', new FakeElement('Welcome to Kuala Lumpur')],
+    ['#note-1', new FakeElement()],
+    ['#note-2', new FakeElement()],
+    ['#note-3', new FakeElement()],
+    ['#zoom', new FakeElement('1')],
+    ['#zoom-value', new FakeElement('1,00×')],
+    ['#recenter', new FakeElement()],
+    ['#download', new FakeElement()],
+    ['#status', new FakeElement()],
+    ['#story-canvas', new FakeElement()],
+  ]);
+  const canvas = elements.get('#story-canvas');
+  canvas.clientWidth = 540;
+  canvas.clientHeight = 960;
+  canvas.getContext = () => context;
+
+  const images = [];
+  class FakeImage extends FakeElement {
+    constructor() {
+      super();
+      this.naturalWidth = 1080;
+      this.naturalHeight = 1920;
+      images.push(this);
+    }
+  }
+
+  return { context, drawImageCalls, elements, images, FakeImage };
+}
+
+test('a rejected file invalidates an earlier image that is still decoding', async () => {
+  const fixture = createAppFixture();
+  const originalDocument = globalThis.document;
+  const originalImage = globalThis.Image;
+  const originalUrl = globalThis.URL;
+  const revokedUrls = [];
+  let nextUrl = 0;
+
+  globalThis.document = {
+    querySelector: (selector) => fixture.elements.get(selector),
+  };
+  globalThis.Image = fixture.FakeImage;
+  globalThis.URL = {
+    createObjectURL: () => `blob:test-${++nextUrl}`,
+    revokeObjectURL: (url) => revokedUrls.push(url),
+  };
+
+  try {
+    await import(`${appUrl.href}?stale-image=${Date.now()}`);
+    const photo = fixture.elements.get('#photo');
+    const download = fixture.elements.get('#download');
+    const status = fixture.elements.get('#status');
+
+    photo.files = [{ type: 'image/jpeg' }];
+    photo.emit('change');
+    assert.equal(fixture.images.length, 1);
+
+    photo.files = [{ type: 'text/plain' }];
+    photo.emit('change');
+    const rejectedStatus = status.textContent;
+
+    fixture.images[0].emit('load');
+
+    assert.match(rejectedStatus, /file immagine valido/i);
+    assert.equal(status.textContent, rejectedStatus);
+    assert.equal(fixture.drawImageCalls.length, 0);
+    assert.equal(download.disabled, true);
+    assert.deepEqual(revokedUrls, ['blob:test-1']);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.Image = originalImage;
+    globalThis.URL = originalUrl;
+  }
+});
