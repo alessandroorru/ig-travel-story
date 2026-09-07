@@ -114,27 +114,76 @@ function createPngBlob() {
   });
 }
 
-async function downloadStory() {
-  if (downloadButton.disabled) return;
-
-  let downloadUrl = null;
-  let link = null;
-  const filename = `travel-story-day-${String(state.day).padStart(2, '0')}.png`;
+function supportsPngFileShare() {
+  if (
+    typeof globalThis.navigator?.share !== 'function'
+    || typeof globalThis.navigator?.canShare !== 'function'
+    || typeof globalThis.File !== 'function'
+  ) {
+    return false;
+  }
 
   try {
-    const blob = await createPngBlob();
+    const probe = new File([''], 'travel-story.png', { type: 'image/png' });
+    return globalThis.navigator.canShare({ files: [probe] });
+  } catch {
+    return false;
+  }
+}
+
+function createPngShareFile(filename) {
+  const dataUrl = canvas.toDataURL('image/png');
+  const match = /^data:image\/png;base64,(.+)$/i.exec(dataUrl);
+  if (!match) throw new Error('Canvas returned an invalid PNG data URL.');
+
+  const binary = globalThis.atob(match[1]);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return new File([bytes], filename, { type: 'image/png' });
+}
+
+function downloadPng(blob, filename) {
+  let downloadUrl = null;
+  let link = null;
+
+  try {
     downloadUrl = URL.createObjectURL(blob);
     link = document.createElement('a');
     link.href = downloadUrl;
     link.download = filename;
     document.body.append(link);
     link.click();
-    setStatus(`PNG scaricato: ${filename}`);
-  } catch {
-    setStatus("Impossibile creare il PNG. Riprova con un'altra immagine.");
   } finally {
     link?.remove();
     if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+  }
+}
+
+const canSharePngFile = supportsPngFileShare();
+downloadButton.textContent = canSharePngFile ? 'Salva o condividi PNG' : 'Scarica PNG';
+
+async function exportStory() {
+  if (downloadButton.disabled) return;
+
+  const filename = `travel-story-day-${String(state.day).padStart(2, '0')}.png`;
+
+  if (canSharePngFile) {
+    try {
+      const file = createPngShareFile(filename);
+      const shareRequest = navigator.share({ files: [file] });
+      await shareRequest;
+      setStatus(`PNG condiviso: ${filename}`);
+      return;
+    } catch (error) {
+      if (error?.name === 'AbortError') return;
+    }
+  }
+
+  try {
+    const blob = await createPngBlob();
+    downloadPng(blob, filename);
+    setStatus(`PNG scaricato: ${filename}`);
+  } catch {
+    setStatus("Impossibile creare il PNG. Riprova con un'altra immagine.");
   }
 }
 
@@ -328,7 +377,7 @@ recenterButton.addEventListener('click', () => {
   updateAvailability(state.image ? 'Fotografia ricentrata.' : 'Carica una fotografia per iniziare.');
 });
 
-downloadButton.addEventListener('click', downloadStory);
+downloadButton.addEventListener('click', exportStory);
 
 canvas.addEventListener('pointerdown', (event) => {
   if (event.pointerType === 'touch') return;

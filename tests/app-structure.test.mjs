@@ -58,7 +58,10 @@ test('uses a Story studio eyebrow and a visible template title above composition
   assert.doesNotMatch(editorTitle, /\bclass=["']eyebrow["']/i);
   assert.match(html, /<h2[^>]*\bid=["']editor-title["'][^>]*>\s*Instagram Story Template\s*<\/h2>/i);
   assert.doesNotMatch(html, /Racconta il viaggio, un giorno alla volta\./i);
-  assert.match(html, /La foto rimane su questo dispositivo/i);
+  assert.match(
+    html,
+    /La foto viene elaborata su questo dispositivo e condivisa solo se scegli un destinatario\./i,
+  );
 
   const photoIndex = html.indexOf('id="photo"');
   const zoomIndex = html.indexOf('id="zoom"');
@@ -309,6 +312,259 @@ function createAppFixture() {
     preview,
   };
 }
+
+function replaceGlobal(name, value) {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, name);
+  Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+  return () => {
+    if (descriptor) {
+      Object.defineProperty(globalThis, name, descriptor);
+    } else {
+      delete globalThis[name];
+    }
+  };
+}
+
+class FakeShareFile extends Blob {
+  constructor(parts, name, options) {
+    super(parts, options);
+    this.name = name;
+  }
+}
+
+function loadFixturePhoto(fixture) {
+  const photo = fixture.elements.get('#photo');
+  photo.files = [{ type: 'image/jpeg' }];
+  photo.emit('change');
+  fixture.images[0].emit('load');
+}
+
+test('uses a file-share capability probe to choose the export button label', async () => {
+  const fixture = createAppFixture();
+  const originalDocument = globalThis.document;
+  const originalImage = globalThis.Image;
+  const originalUrl = globalThis.URL;
+  const restoreNavigator = replaceGlobal('navigator', {
+    share() {},
+    canShare(payload) {
+      assert.equal(payload.files.length, 1);
+      assert.equal(payload.files[0].type, 'image/png');
+      return true;
+    },
+  });
+  const restoreFile = replaceGlobal('File', FakeShareFile);
+
+  globalThis.document = { querySelector: (selector) => fixture.elements.get(selector) };
+  globalThis.Image = fixture.FakeImage;
+  globalThis.URL = { createObjectURL() {}, revokeObjectURL() {} };
+
+  try {
+    await import(`${appUrl.href}?share-label=${Date.now()}`);
+    assert.equal(fixture.elements.get('#download').textContent, 'Salva o condividi PNG');
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.Image = originalImage;
+    globalThis.URL = originalUrl;
+    restoreNavigator();
+    restoreFile();
+  }
+});
+
+test('shares a PNG File without an anchor when file share is available', async () => {
+  const fixture = createAppFixture();
+  const originalDocument = globalThis.document;
+  const originalImage = globalThis.Image;
+  const originalUrl = globalThis.URL;
+  let sharedPayload;
+  const restoreNavigator = replaceGlobal('navigator', {
+    canShare: () => true,
+    async share(payload) { sharedPayload = payload; },
+  });
+  const restoreFile = replaceGlobal('File', FakeShareFile);
+
+  fixture.elements.get('#story-canvas').toDataURL = (type) => {
+    assert.equal(type, 'image/png');
+    return 'data:image/png;base64,cG5n';
+  };
+  globalThis.document = {
+    querySelector: (selector) => fixture.elements.get(selector),
+    createElement: () => assert.fail('share success must not create a download anchor'),
+    body: { append: () => assert.fail('share success must not append a download anchor') },
+  };
+  globalThis.Image = fixture.FakeImage;
+  globalThis.URL = {
+    createObjectURL: () => 'blob:photo',
+    revokeObjectURL: () => assert.fail('share success must not revoke an object URL'),
+  };
+
+  try {
+    await import(`${appUrl.href}?share-success=${Date.now()}`);
+    loadFixturePhoto(fixture);
+    globalThis.URL.createObjectURL = () => assert.fail('share success must not create an object URL');
+    const day = fixture.elements.get('#day');
+    day.value = '7';
+    fixture.elements.get('#story-form').emit('input', { target: day });
+    await Promise.all(fixture.elements.get('#download').emit('click'));
+
+    assert.deepEqual(Object.keys(sharedPayload), ['files']);
+    assert.equal(sharedPayload.files[0] instanceof FakeShareFile, true);
+    assert.equal(sharedPayload.files[0].name, 'travel-story-day-07.png');
+    assert.equal(sharedPayload.files[0].type, 'image/png');
+    assert.match(fixture.elements.get('#status').textContent, /PNG condiviso/i);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.Image = originalImage;
+    globalThis.URL = originalUrl;
+    restoreNavigator();
+    restoreFile();
+  }
+});
+
+test('opens native file share in the click task before async canvas encoding', async () => {
+  const fixture = createAppFixture();
+  const originalDocument = globalThis.document;
+  const originalImage = globalThis.Image;
+  const originalUrl = globalThis.URL;
+  let sharedPayload;
+  let toBlobCalls = 0;
+  const restoreNavigator = replaceGlobal('navigator', {
+    canShare: () => true,
+    share(payload) {
+      sharedPayload = payload;
+      return Promise.resolve();
+    },
+  });
+  const restoreFile = replaceGlobal('File', FakeShareFile);
+
+  fixture.elements.get('#story-canvas').toDataURL = (type) => {
+    assert.equal(type, 'image/png');
+    return 'data:image/png;base64,cG5n';
+  };
+  fixture.elements.get('#story-canvas').toBlob = () => { toBlobCalls += 1; };
+  globalThis.document = {
+    querySelector: (selector) => fixture.elements.get(selector),
+    createElement: () => assert.fail('native share must not create a download anchor'),
+    body: { append: () => assert.fail('native share must not append a download anchor') },
+  };
+  globalThis.Image = fixture.FakeImage;
+  globalThis.URL = {
+    createObjectURL: () => 'blob:photo',
+    revokeObjectURL: () => assert.fail('native share must not revoke an object URL'),
+  };
+
+  try {
+    await import(`${appUrl.href}?share-click-task=${Date.now()}`);
+    loadFixturePhoto(fixture);
+    const day = fixture.elements.get('#day');
+    day.value = '9';
+    fixture.elements.get('#story-form').emit('input', { target: day });
+
+    const pendingShare = Promise.all(fixture.elements.get('#download').emit('click'));
+
+    assert.equal(toBlobCalls, 0, 'native share must be invoked before async canvas encoding');
+    assert.deepEqual(Object.keys(sharedPayload), ['files']);
+    assert.equal(sharedPayload.files[0] instanceof FakeShareFile, true);
+    assert.equal(sharedPayload.files[0].name, 'travel-story-day-09.png');
+    assert.equal(sharedPayload.files[0].type, 'image/png');
+    await pendingShare;
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.Image = originalImage;
+    globalThis.URL = originalUrl;
+    restoreNavigator();
+    restoreFile();
+  }
+});
+
+test('treats a cancelled share as a normal exit without a fallback download', async () => {
+  const fixture = createAppFixture();
+  const originalDocument = globalThis.document;
+  const originalImage = globalThis.Image;
+  const originalUrl = globalThis.URL;
+  const restoreNavigator = replaceGlobal('navigator', {
+    canShare: () => true,
+    async share() { throw Object.assign(new Error('cancelled'), { name: 'AbortError' }); },
+  });
+  const restoreFile = replaceGlobal('File', FakeShareFile);
+
+  fixture.elements.get('#story-canvas').toDataURL = () => 'data:image/png;base64,cG5n';
+  globalThis.document = {
+    querySelector: (selector) => fixture.elements.get(selector),
+    createElement: () => assert.fail('cancelled share must not fall back to download'),
+    body: { append: () => assert.fail('cancelled share must not append a download anchor') },
+  };
+  globalThis.Image = fixture.FakeImage;
+  globalThis.URL = { createObjectURL: () => 'blob:photo' };
+
+  try {
+    await import(`${appUrl.href}?share-cancel=${Date.now()}`);
+    loadFixturePhoto(fixture);
+    globalThis.URL.createObjectURL = () => assert.fail('cancelled share must not create an object URL');
+    await Promise.all(fixture.elements.get('#download').emit('click'));
+
+    assert.doesNotMatch(fixture.elements.get('#status').textContent, /Impossibile|errore/i);
+    assert.equal(fixture.elements.get('#download').disabled, false);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.Image = originalImage;
+    globalThis.URL = originalUrl;
+    restoreNavigator();
+    restoreFile();
+  }
+});
+
+test('falls back to a cleaned-up download when sharing fails', async () => {
+  const fixture = createAppFixture();
+  const originalDocument = globalThis.document;
+  const originalImage = globalThis.Image;
+  const originalUrl = globalThis.URL;
+  const revokedUrls = [];
+  const anchors = [];
+  let shareCalls = 0;
+  const restoreNavigator = replaceGlobal('navigator', {
+    canShare: () => true,
+    async share() {
+      shareCalls += 1;
+      throw new Error('share unavailable');
+    },
+  });
+  const restoreFile = replaceGlobal('File', FakeShareFile);
+
+  fixture.elements.get('#story-canvas').toDataURL = () => 'data:image/png;base64,cG5n';
+  fixture.elements.get('#story-canvas').toBlob = (callback) => callback(new Blob(['png'], { type: 'image/png' }));
+  globalThis.document = {
+    querySelector: (selector) => fixture.elements.get(selector),
+    createElement: () => {
+      const anchor = { href: '', download: '', clicked: false, click() { this.clicked = true; }, remove() {} };
+      anchors.push(anchor);
+      return anchor;
+    },
+    body: { append() {} },
+  };
+  globalThis.Image = fixture.FakeImage;
+  globalThis.URL = {
+    createObjectURL: () => 'blob:fallback',
+    revokeObjectURL: (url) => revokedUrls.push(url),
+  };
+
+  try {
+    await import(`${appUrl.href}?share-fallback=${Date.now()}`);
+    loadFixturePhoto(fixture);
+    await Promise.all(fixture.elements.get('#download').emit('click'));
+
+    assert.equal(shareCalls, 1);
+    assert.equal(anchors[0].download, 'travel-story-day-01.png');
+    assert.equal(anchors[0].clicked, true);
+    assert.deepEqual(revokedUrls, ['blob:fallback']);
+    assert.match(fixture.elements.get('#status').textContent, /PNG scaricato/i);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.Image = originalImage;
+    globalThis.URL = originalUrl;
+    restoreNavigator();
+    restoreFile();
+  }
+});
 
 test('synchronizes the DOM order with mobile media changes', async () => {
   const fixture = createAppFixture();
