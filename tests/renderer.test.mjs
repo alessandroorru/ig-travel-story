@@ -23,11 +23,16 @@ function createRecordingContext() {
       gradients.push({ args, stops });
       return { addColorStop: (...stop) => stops.push(stop) };
     },
+    createRadialGradient(...args) {
+      const stops = [];
+      gradients.push({ args, stops, radial: true });
+      return { addColorStop: (...stop) => stops.push(stop) };
+    },
     clearRect: (...args) => calls.push(['clearRect', ...args]),
     drawImage: (...args) => calls.push(['drawImage', ...args]),
     fillRect: (...args) => calls.push(['fillRect', ...args]),
     fillText(...args) {
-      calls.push(['fillText', ...args, this.fillStyle]);
+      calls.push(['fillText', ...args, this.fillStyle, this.font, this.textAlign, this.textBaseline]);
     },
     measureText(value) {
       const characterWidth = this.font.includes('104px') ? 56 : 20;
@@ -297,4 +302,79 @@ test('translates the fades by the safe-area offset while preserving their profil
     CANVAS_WIDTH,
     CANVAS_HEIGHT - (CANVAS_HEIGHT * 0.48 - 170),
   ]);
+});
+
+test('renders postcard text centered with preserved casing, safe-area bounds, and no Cinema copy', () => {
+  const context = createRecordingContext();
+
+  renderStory(context, {
+    template: 'postcard',
+    image: { width: 1080, height: 1920 },
+    day: 7,
+    totalDays: 35,
+    title: 'Cinema title',
+    notes: ['Cinema note'],
+    centerText: 'Ciao\nMondo MiXto',
+  });
+
+  const textCalls = context.calls.filter(([name]) => name === 'fillText');
+  assert.deepEqual(textCalls.map(([, value]) => value), ['Ciao', 'Mondo MiXto']);
+  assert.ok(textCalls.every(([, , x]) => x === CANVAS_WIDTH / 2));
+  assert.ok(textCalls.every(([, , , y]) => y >= 250 && y <= 1670));
+  assert.ok(textCalls.every(([, , , , , font]) => /Snell Roundhand.*Apple Chancery.*serif/i.test(font)));
+  assert.ok(textCalls.every(([, , , , , , align]) => align === 'center'));
+  assert.equal(context.gradients.length, 1);
+  assert.equal(context.gradients[0].radial, true);
+  assert.equal(context.textAlign, 'start');
+  assert.equal(context.textBaseline, 'alphabetic');
+  assert.equal(context.shadowBlur, 0);
+});
+
+test('centers postcard line baselines vertically for one and multiple lines', () => {
+  const singleLineContext = createRecordingContext();
+  renderStory(singleLineContext, {
+    template: 'postcard',
+    image: { width: 1080, height: 1920 },
+    centerText: 'Una riga',
+  });
+  const singleLine = singleLineContext.calls.find(([name]) => name === 'fillText');
+  assert.equal(singleLine?.[3], CANVAS_HEIGHT / 2);
+  assert.equal(singleLine?.[7], 'middle');
+
+  const multiLineContext = createRecordingContext();
+  renderStory(multiLineContext, {
+    template: 'postcard',
+    image: { width: 1080, height: 1920 },
+    centerText: 'Prima\nSeconda\nTerza',
+  });
+  const multiLines = multiLineContext.calls.filter(([name]) => name === 'fillText');
+  assert.deepEqual(multiLines.map(([, , , y]) => y), [854, 960, 1066]);
+  assert.ok(multiLines.every(([, , , , , , , baseline]) => baseline === 'middle'));
+});
+
+test('bounds postcard copy to five ellipsized lines and restores Cinema canvas text state', () => {
+  const context = createRecordingContext();
+  const longText = Array.from({ length: 80 }, () => 'parola').join(' ');
+
+  renderStory(context, {
+    template: 'postcard',
+    image: { width: 1080, height: 1920 },
+    centerText: longText,
+  });
+
+  const postcardCalls = context.calls.filter(([name]) => name === 'fillText');
+  assert.equal(postcardCalls.length, 5);
+  assert.match(postcardCalls.at(-1)[1], /…$/);
+
+  renderStory(context, {
+    image: { width: 1080, height: 1920 },
+    day: 1,
+    totalDays: 35,
+    title: 'Cinema',
+    notes: ['Note'],
+  });
+
+  const cinemaDay = context.calls.filter(([name, value]) => name === 'fillText' && value === 'Day 01 / 35').at(-1);
+  assert.equal(cinemaDay?.[6], 'start');
+  assert.equal(cinemaDay?.[7], 'top');
 });

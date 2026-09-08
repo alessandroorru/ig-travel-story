@@ -201,6 +201,29 @@ test('keeps PNG export unavailable in markup until a valid photo is loaded', () 
   assert.match(elementWithId('button', 'download'), /\bdisabled\b/);
 });
 
+test('offers two accessible visual story template radios without a select', () => {
+  const cinema = elementWithId('input', 'template-cinema');
+  const postcard = elementWithId('input', 'template-postcard');
+
+  assertAttribute(cinema, 'type', 'radio');
+  assertAttribute(cinema, 'name', 'template');
+  assertAttribute(cinema, 'value', 'cinema');
+  assert.match(cinema, /\bchecked\b/);
+  assertAttribute(postcard, 'type', 'radio');
+  assertAttribute(postcard, 'name', 'template');
+  assertAttribute(postcard, 'value', 'postcard');
+  assert.match(html, /<label[^>]*for=["']template-cinema["'][^>]*>[\s\S]*?Fotogramma/i);
+  assert.match(html, /<label[^>]*for=["']template-postcard["'][^>]*>[\s\S]*?Cartolina corsiva/i);
+  assert.match(html, /id=["']cinema-fields["']/);
+  assert.match(html, /id=["']postcard-fields["'][^>]*\bhidden\b/);
+  assert.match(elementWithId('textarea', 'center-text'), /name=["']center-text["']/);
+  assert.doesNotMatch(html, /<select\b/i);
+
+  assert.match(css, /\.template-picker__radio:checked\s*\+\s*\.template-option\s*\{[^}]*border-color:\s*#ff3b30/s);
+  assert.match(css, /\.template-option__check/);
+  assert.match(css, /@media\s*\(max-width:\s*60rem\)\s*\{[\s\S]*?\.template-picker__options\s*\{[^}]*overflow-x:\s*auto/s);
+});
+
 class FakeElement {
   constructor(value = '') {
     this.value = value;
@@ -211,6 +234,7 @@ class FakeElement {
     this.listenerOptions = new Map();
     this.focusCalls = 0;
     this.pointerCaptures = [];
+    this.attributes = new Map();
   }
 
   addEventListener(type, listener, options) {
@@ -228,7 +252,7 @@ class FakeElement {
     ));
   }
 
-  setAttribute() {}
+  setAttribute(name, value) { this.attributes.set(name, value); }
   focus() { this.focusCalls += 1; }
   setPointerCapture(pointerId) { this.pointerCaptures.push(pointerId); }
   releasePointerCapture() {}
@@ -260,6 +284,7 @@ function createAppFixture() {
     fillText(...args) { textCalls.push(args); },
     drawImage(...args) { drawImageCalls.push(args); },
     createLinearGradient() { return { addColorStop() {} }; },
+    createRadialGradient() { return { addColorStop() {} }; },
     measureText(value) { return { width: [...value].length * 20 }; },
   };
   const editor = new FakeElement();
@@ -270,6 +295,10 @@ function createAppFixture() {
     ['.editor', editor],
     ['.preview', preview],
     ['#story-form', new FakeElement()],
+    ['#template-cinema', Object.assign(new FakeElement('cinema'), { checked: true })],
+    ['#template-postcard', Object.assign(new FakeElement('postcard'), { checked: false })],
+    ['#cinema-fields', new FakeElement()],
+    ['#postcard-fields', Object.assign(new FakeElement(), { hidden: true })],
     ['#photo', new FakeElement()],
     ['#day', new FakeElement('1')],
     ['#total-days', new FakeElement('35')],
@@ -277,6 +306,7 @@ function createAppFixture() {
     ['#note-1', new FakeElement()],
     ['#note-2', new FakeElement()],
     ['#note-3', new FakeElement()],
+    ['#center-text', new FakeElement()],
     ['#zoom', new FakeElement('1')],
     ['#zoom-value', new FakeElement('1,00×')],
     ['#recenter', new FakeElement()],
@@ -367,6 +397,78 @@ test('uses a file-share capability probe to choose the export button label', asy
     globalThis.URL = originalUrl;
     restoreNavigator();
     restoreFile();
+  }
+});
+
+test('switches templates without discarding values and lets postcard export despite an invalid cinema day', async () => {
+  const fixture = createAppFixture();
+  const originalDocument = globalThis.document;
+  const originalImage = globalThis.Image;
+  const originalUrl = globalThis.URL;
+  const anchors = [];
+  let nextUrl = 0;
+
+  fixture.elements.get('#story-canvas').toBlob = (callback) => callback(new Blob(['png'], { type: 'image/png' }));
+  globalThis.document = {
+    querySelector: (selector) => fixture.elements.get(selector),
+    createElement: () => {
+      const anchor = { href: '', download: '', click() {}, remove() {} };
+      anchors.push(anchor);
+      return anchor;
+    },
+    body: { append() {} },
+  };
+  globalThis.Image = fixture.FakeImage;
+  globalThis.URL = {
+    createObjectURL: () => `blob:template-${++nextUrl}`,
+    revokeObjectURL() {},
+  };
+
+  try {
+    await import(`${appUrl.href}?template-switch=${Date.now()}`);
+    loadFixturePhoto(fixture);
+    const form = fixture.elements.get('#story-form');
+    const cinema = fixture.elements.get('#template-cinema');
+    const postcard = fixture.elements.get('#template-postcard');
+    const day = fixture.elements.get('#day');
+    const title = fixture.elements.get('#title');
+    const note = fixture.elements.get('#note-1');
+    const centerText = fixture.elements.get('#center-text');
+    const download = fixture.elements.get('#download');
+
+    day.value = '36';
+    title.value = 'Cinema retained';
+    note.value = 'A retained note';
+    centerText.value = 'Cartolina\ncon casing';
+    form.emit('input', { target: centerText });
+    assert.equal(download.disabled, true);
+
+    cinema.checked = false;
+    postcard.checked = true;
+    postcard.emit('change');
+    assert.equal(fixture.elements.get('#cinema-fields').hidden, true);
+    assert.equal(fixture.elements.get('#postcard-fields').hidden, false);
+    assert.equal(download.disabled, false);
+    assert.equal(title.value, 'Cinema retained');
+    assert.equal(note.value, 'A retained note');
+    assert.equal(centerText.value, 'Cartolina\ncon casing');
+    assert.ok(fixture.textCalls.some(([value]) => value === 'Cartolina'));
+    assert.ok(fixture.textCalls.some(([value]) => value === 'con casing'));
+
+    await Promise.all(download.emit('click'));
+    assert.equal(anchors.at(-1).download, 'travel-story-postcard.png');
+
+    postcard.checked = false;
+    cinema.checked = true;
+    cinema.emit('change');
+    assert.equal(fixture.elements.get('#cinema-fields').hidden, false);
+    assert.equal(fixture.elements.get('#postcard-fields').hidden, true);
+    assert.equal(download.disabled, true);
+    assert.ok(fixture.textCalls.some(([value]) => value === 'CINEMA RETAINED'));
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.Image = originalImage;
+    globalThis.URL = originalUrl;
   }
 });
 

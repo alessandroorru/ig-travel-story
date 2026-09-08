@@ -10,6 +10,8 @@ const BOTTOM_FADE_START = CANVAS_HEIGHT * 0.48 - TEXT_SAFE_OFFSET;
 const BOTTOM_FADE_END = CANVAS_HEIGHT - TEXT_SAFE_OFFSET;
 const RED = '#ff3b30';
 const WHITE = '#f7f7f4';
+const POSTCARD_FONT = 'italic 76px "Snell Roundhand", "Apple Chancery", cursive, serif';
+const POSTCARD_LINE_HEIGHT = 106;
 const clamp = (value, minimum, maximum) => {
   const clampedValue = Math.min(maximum, Math.max(minimum, value));
   return clampedValue === 0 ? 0 : clampedValue;
@@ -139,7 +141,51 @@ export function wrapText(text, measure, maxWidth, maxLines) {
   return visibleLines;
 }
 
+function resetCanvasTextState(context) {
+  context.fillStyle = WHITE;
+  context.font = '10px sans-serif';
+  context.textAlign = 'start';
+  context.textBaseline = 'alphabetic';
+  context.shadowColor = 'transparent';
+  context.shadowBlur = 0;
+  context.shadowOffsetX = 0;
+  context.shadowOffsetY = 0;
+}
+
+function renderPostcard(context, centerText) {
+  const vignette = context.createRadialGradient(
+    CANVAS_WIDTH / 2,
+    CANVAS_HEIGHT / 2,
+    260,
+    CANVAS_WIDTH / 2,
+    CANVAS_HEIGHT / 2,
+    1080,
+  );
+  vignette.addColorStop(0, 'rgba(0, 0, 0, 0.16)');
+  vignette.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  context.fillStyle = vignette;
+  context.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+  context.fillStyle = WHITE;
+  context.font = POSTCARD_FONT;
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.shadowColor = 'rgba(0, 0, 0, 0.72)';
+  context.shadowBlur = 14;
+  context.shadowOffsetY = 5;
+
+  const text = String(centerText ?? '');
+  const lines = /\S/u.test(text)
+    ? wrapText(text, (value) => context.measureText(value).width, CANVAS_WIDTH - CANVAS_PADDING * 3, 5)
+    : [];
+  const startY = CANVAS_HEIGHT / 2 - ((lines.length - 1) * POSTCARD_LINE_HEIGHT) / 2;
+  for (const [index, line] of lines.entries()) {
+    if (line) context.fillText(line, CANVAS_WIDTH / 2, startY + index * POSTCARD_LINE_HEIGHT);
+  }
+}
+
 export function renderStory(context, state) {
+  resetCanvasTextState(context);
   context.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
   const image = state?.image;
@@ -154,6 +200,12 @@ export function renderStory(context, state) {
       state?.offsetY,
     );
     context.drawImage(image, placement.x, placement.y, placement.width, placement.height);
+  }
+
+  if (state?.template === 'postcard') {
+    renderPostcard(context, state?.centerText);
+    resetCanvasTextState(context);
+    return;
   }
 
   const topFade = context.createLinearGradient(0, TOP_FADE_START, 0, TOP_FADE_END);
@@ -211,4 +263,6 @@ export function renderStory(context, state) {
     }
     bottom -= 26;
   }
+
+  resetCanvasTextState(context);
 }

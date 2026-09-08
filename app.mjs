@@ -10,6 +10,12 @@ const form = document.querySelector('#story-form');
 const appShell = document.querySelector('.app-shell');
 const editor = document.querySelector('.editor');
 const preview = document.querySelector('.preview');
+const templateInputs = [
+  document.querySelector('#template-cinema'),
+  document.querySelector('#template-postcard'),
+];
+const cinemaFields = document.querySelector('#cinema-fields');
+const postcardFields = document.querySelector('#postcard-fields');
 const photoInput = document.querySelector('#photo');
 const dayInput = document.querySelector('#day');
 const totalDaysInput = document.querySelector('#total-days');
@@ -19,6 +25,7 @@ const noteInputs = [
   document.querySelector('#note-2'),
   document.querySelector('#note-3'),
 ];
+const centerTextInput = document.querySelector('#center-text');
 const zoomInput = document.querySelector('#zoom');
 const zoomValue = document.querySelector('#zoom-value');
 const recenterButton = document.querySelector('#recenter');
@@ -28,12 +35,14 @@ const canvas = document.querySelector('#story-canvas');
 const context = canvas.getContext('2d');
 
 const state = {
+  template: 'cinema',
   image: null,
   imageUrl: null,
   day: 1,
   totalDays: 35,
   title: 'Welcome to Kuala Lumpur',
   notes: ['', '', ''],
+  centerText: '',
   zoom: 1,
   offsetX: 0,
   offsetY: 0,
@@ -64,12 +73,29 @@ function syncZoomControl() {
   zoomValue.value = `${state.zoom.toFixed(2).replace('.', ',')}×`;
 }
 
+function selectedTemplate() {
+  return templateInputs.find((input) => input?.checked)?.value === 'postcard'
+    ? 'postcard'
+    : 'cinema';
+}
+
+function syncTemplateFields() {
+  const isCinema = state.template !== 'postcard';
+  cinemaFields.hidden = !isCinema;
+  postcardFields.hidden = isCinema;
+  for (const input of templateInputs) {
+    input.checked = input.value === state.template;
+  }
+}
+
 function readInteger(input) {
   const value = Number(input.value);
   return Number.isInteger(value) ? value : Number.NaN;
 }
 
 function hasValidDayRange() {
+  if (state.template === 'postcard') return true;
+
   return (
     Number.isInteger(state.day)
     && state.day >= 1
@@ -83,8 +109,9 @@ function hasValidDayRange() {
 
 function updateAvailability(statusWhenValid) {
   const validRange = hasValidDayRange();
-  dayInput.setAttribute('aria-invalid', String(!validRange));
-  totalDaysInput.setAttribute('aria-invalid', String(!validRange));
+  const showDayError = state.template === 'cinema' && !validRange;
+  dayInput.setAttribute('aria-invalid', String(showDayError));
+  totalDaysInput.setAttribute('aria-invalid', String(showDayError));
   downloadButton.disabled = !state.image || !validRange;
 
   if (!validRange) {
@@ -164,7 +191,9 @@ downloadButton.textContent = canSharePngFile ? 'Salva o condividi PNG' : 'Scaric
 async function exportStory() {
   if (downloadButton.disabled) return;
 
-  const filename = `travel-story-day-${String(state.day).padStart(2, '0')}.png`;
+  const filename = state.template === 'postcard'
+    ? 'travel-story-postcard.png'
+    : `travel-story-day-${String(state.day).padStart(2, '0')}.png`;
 
   if (canSharePngFile) {
     try {
@@ -231,10 +260,13 @@ function clampOffsets() {
 }
 
 function updateTextState() {
+  state.template = selectedTemplate();
   state.day = readInteger(dayInput);
   state.totalDays = readInteger(totalDaysInput);
   state.title = titleInput.value;
   state.notes = noteInputs.map((input) => input.value);
+  state.centerText = centerTextInput.value;
+  syncTemplateFields();
   updateAvailability();
   redraw();
 }
@@ -361,6 +393,13 @@ form.addEventListener('input', (event) => {
   if (event.target !== photoInput && event.target !== zoomInput) updateTextState();
 });
 
+for (const templateInput of templateInputs) {
+  templateInput.addEventListener('change', () => {
+    if (!templateInput.checked) return;
+    updateTextState();
+  });
+}
+
 zoomInput.addEventListener('input', () => {
   state.zoom = Number.parseFloat(zoomInput.value);
   syncZoomControl();
@@ -440,5 +479,6 @@ canvas.addEventListener('keydown', (event) => {
   moveImage(...movement);
 });
 
+syncTemplateFields();
 updateAvailability();
 redraw();

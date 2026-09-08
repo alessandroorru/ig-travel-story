@@ -24,6 +24,10 @@ textarea {
   font: inherit;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 button,
 input,
 textarea,
@@ -124,6 +128,132 @@ legend span {
 .field__heading {
   display: grid;
   gap: 0.5rem;
+}
+
+#cinema-fields,
+#postcard-fields {
+  display: grid;
+  gap: 1.2rem;
+}
+
+.template-picker {
+  padding: 0;
+  border: 0;
+}
+
+.template-picker__options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.template-picker__radio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+.template-option {
+  position: relative;
+  display: grid;
+  grid-template-columns: 5.75rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+  padding: 0.5rem;
+  border: 1px solid #383836;
+  border-radius: 0.35rem;
+  background: #151514;
+  cursor: pointer;
+}
+
+.template-picker__radio:checked + .template-option {
+  border-color: #ff3b30;
+}
+
+.template-picker__radio:focus-visible + .template-option {
+  outline: 0.2rem solid #ff6b62;
+  outline-offset: 0.2rem;
+}
+
+.template-thumbnail {
+  position: relative;
+  display: grid;
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  overflow: hidden;
+  padding: 0.45rem;
+  background: linear-gradient(145deg, #394352, #10100f 62%);
+  color: #f7f7f4;
+  font-size: 0.32rem;
+  line-height: 1.05;
+}
+
+.template-thumbnail--cinema {
+  align-content: space-between;
+  background:
+    linear-gradient(to bottom, rgb(0 0 0 / 0.62), transparent 36%, rgb(0 0 0 / 0.78)),
+    linear-gradient(145deg, #6b5440, #171816 62%);
+}
+
+.template-thumbnail__day,
+.template-thumbnail__title,
+.template-thumbnail__note {
+  display: block;
+}
+
+.template-thumbnail__day,
+.template-thumbnail__note {
+  color: #e5e5e1;
+}
+
+.template-thumbnail__title {
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+
+.template-thumbnail--postcard {
+  place-items: center;
+  text-align: center;
+  background:
+    radial-gradient(circle, rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.38)),
+    linear-gradient(145deg, #8f9277, #27362f 70%);
+}
+
+.template-thumbnail__postcard-copy {
+  font-family: "Snell Roundhand", "Apple Chancery", cursive, serif;
+  font-size: 0.75rem;
+  font-style: italic;
+}
+
+.template-option__name {
+  font-size: 0.85rem;
+  font-weight: 760;
+  line-height: 1.2;
+}
+
+.template-option__check {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.4rem;
+  display: grid;
+  place-items: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 999px;
+  background: #ff3b30;
+  color: #120302;
+  font-size: 0.8rem;
+  font-weight: 900;
+  opacity: 0;
+}
+
+.template-picker__radio:checked + .template-option .template-option__check {
+  opacity: 1;
 }
 
 .field-row {
@@ -333,6 +463,18 @@ input[type="range"] {
 
   .zoom-touch-hint {
     display: block;
+  }
+
+  .template-picker__options {
+    display: flex;
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+    scroll-snap-type: x proximity;
+  }
+
+  .template-option {
+    flex: 0 0 min(15rem, 78vw);
+    scroll-snap-align: start;
   }
 }
 

@@ -28,6 +28,31 @@
         </header>
 
         <form id="story-form" novalidate>
+          <fieldset class="template-picker">
+            <legend>Template story</legend>
+            <div class="template-picker__options">
+              <input id="template-cinema" class="template-picker__radio" type="radio" name="template" value="cinema" checked>
+              <label class="template-option" for="template-cinema">
+                <span class="template-thumbnail template-thumbnail--cinema" aria-hidden="true">
+                  <span class="template-thumbnail__day">Day 01 / 35</span>
+                  <span class="template-thumbnail__title">WELCOME</span>
+                  <span class="template-thumbnail__note">— appunti di viaggio</span>
+                </span>
+                <span class="template-option__name">Fotogramma</span>
+                <span class="template-option__check" aria-hidden="true">✓</span>
+              </label>
+
+              <input id="template-postcard" class="template-picker__radio" type="radio" name="template" value="postcard">
+              <label class="template-option" for="template-postcard">
+                <span class="template-thumbnail template-thumbnail--postcard" aria-hidden="true">
+                  <span class="template-thumbnail__postcard-copy">Una piccola<br>cartolina</span>
+                </span>
+                <span class="template-option__name">Cartolina corsiva</span>
+                <span class="template-option__check" aria-hidden="true">✓</span>
+              </label>
+            </div>
+          </fieldset>
+
           <div class="field field--file">
             <label for="photo">Fotografia</label>
             <input id="photo" name="photo" type="file" accept="image/*">
@@ -44,37 +69,46 @@
             <button id="recenter" type="button" class="button button--secondary">Ricentra</button>
           </div>
 
-          <div class="field-row">
-            <div class="field">
-              <label for="day">Giorno</label>
-              <input id="day" name="day" type="number" min="1" max="999" step="1" value="1">
+          <div id="cinema-fields">
+            <div class="field-row">
+              <div class="field">
+                <label for="day">Giorno</label>
+                <input id="day" name="day" type="number" min="1" max="999" step="1" value="1">
+              </div>
+              <div class="field">
+                <label for="total-days">Giorni totali</label>
+                <input id="total-days" name="total-days" type="number" min="1" max="999" step="1" value="35">
+              </div>
             </div>
+
             <div class="field">
-              <label for="total-days">Giorni totali</label>
-              <input id="total-days" name="total-days" type="number" min="1" max="999" step="1" value="35">
+              <label for="title">Titolo</label>
+              <input id="title" name="title" type="text" maxlength="42" value="Welcome to Kuala Lumpur">
             </div>
+
+            <fieldset>
+              <legend>Osservazioni <span>opzionali</span></legend>
+              <div class="field">
+                <label for="note-1">Osservazione 1</label>
+                <textarea id="note-1" name="note-1" rows="2"></textarea>
+              </div>
+              <div class="field">
+                <label for="note-2">Osservazione 2</label>
+                <textarea id="note-2" name="note-2" rows="2"></textarea>
+              </div>
+              <div class="field">
+                <label for="note-3">Osservazione 3</label>
+                <textarea id="note-3" name="note-3" rows="2"></textarea>
+              </div>
+            </fieldset>
           </div>
 
-          <div class="field">
-            <label for="title">Titolo</label>
-            <input id="title" name="title" type="text" maxlength="42" value="Welcome to Kuala Lumpur">
+          <div id="postcard-fields" hidden>
+            <div class="field">
+              <label for="center-text">Testo centrale</label>
+              <textarea id="center-text" name="center-text" rows="5"></textarea>
+            </div>
           </div>
-
-          <fieldset>
-            <legend>Osservazioni <span>opzionali</span></legend>
-            <div class="field">
-              <label for="note-1">Osservazione 1</label>
-              <textarea id="note-1" name="note-1" rows="2"></textarea>
-            </div>
-            <div class="field">
-              <label for="note-2">Osservazione 2</label>
-              <textarea id="note-2" name="note-2" rows="2"></textarea>
-            </div>
-            <div class="field">
-              <label for="note-3">Osservazione 3</label>
-              <textarea id="note-3" name="note-3" rows="2"></textarea>
-            </div>
-          </fieldset>
 
           <div class="actions actions--download">
             <button id="download" type="button" class="button button--primary" disabled>Scarica PNG</button>
