@@ -9,19 +9,19 @@
     >
     <meta
       name="description"
-      content="Crea una travel story privata nel browser e scaricala in formato Instagram Story."
+      content="Crea template Instagram nel browser e scaricali sul tuo dispositivo."
     >
-    <title>Travel Story Generator</title>
+    <title>Instagram Template Generator</title>
     <link rel="stylesheet" href="styles.css">
     <script type="module" src="app.mjs"></script>
   </head>
   <body>
     <main class="app-shell">
-      <h1 class="visually-hidden">Travel Story Generator</h1>
+      <h1 class="visually-hidden">Instagram Template Generator</h1>
       <section class="editor" aria-labelledby="editor-title">
         <header class="editor__header">
-          <p class="eyebrow">Story studio</p>
-          <h2 id="editor-title">Instagram Story Template</h2>
+          <p class="eyebrow">Template studio</p>
+          <h2 id="editor-title">Instagram Template Generator</h2>
           <p class="editor__intro">
             La foto viene elaborata su questo dispositivo e condivisa solo se scegli un destinatario.
           </p>
@@ -29,7 +29,7 @@
 
         <form id="story-form" novalidate>
           <fieldset class="template-picker">
-            <legend>Template story</legend>
+            <legend>Template</legend>
             <div class="template-picker__options">
               <input id="template-cinema" class="template-picker__radio" type="radio" name="template" value="cinema" checked>
               <label class="template-option" for="template-cinema">
@@ -39,6 +39,7 @@
                   <span class="template-thumbnail__note">— appunti di viaggio</span>
                 </span>
                 <span class="template-option__name">Fotogramma</span>
+                <span class="template-option__badge"><span class="template-option__format-icon template-option__format-icon--story" aria-hidden="true"></span>Story</span>
                 <span class="template-option__check" aria-hidden="true">✓</span>
               </label>
 
@@ -48,15 +49,37 @@
                   <span class="template-thumbnail__postcard-copy">Una piccola<br>cartolina</span>
                 </span>
                 <span class="template-option__name">Cartolina corsiva</span>
+                <span class="template-option__badge"><span class="template-option__format-icon template-option__format-icon--story" aria-hidden="true"></span>Story</span>
+                <span class="template-option__check" aria-hidden="true">✓</span>
+              </label>
+              <input id="template-post-stack" class="template-picker__radio" type="radio" name="template" value="post-stack">
+              <label class="template-option" for="template-post-stack">
+                <span class="template-thumbnail template-thumbnail--post-stack" aria-hidden="true">
+                  <span class="template-thumbnail__panel template-thumbnail__panel--top"></span>
+                  <span class="template-thumbnail__panel template-thumbnail__panel--bottom"></span>
+                </span>
+                <span class="template-option__name">Stack fotografico</span>
+                <span class="template-option__badge"><span class="template-option__format-icon template-option__format-icon--post" aria-hidden="true"></span>Post</span>
                 <span class="template-option__check" aria-hidden="true">✓</span>
               </label>
             </div>
           </fieldset>
 
-          <div class="field field--file">
+          <div id="story-photo-fields" class="field field--file">
             <label for="photo">Fotografia</label>
             <input id="photo" name="photo" type="file" accept="image/*">
             <p class="field__hint">JPG, PNG o un altro formato immagine supportato dal browser.</p>
+          </div>
+
+          <div id="post-stack-fields" hidden>
+            <div class="field field--file">
+              <label for="post-photo-top">Foto superiore</label>
+              <input id="post-photo-top" name="post-photo-top" type="file" accept="image/*">
+            </div>
+            <div class="field field--file">
+              <label for="post-photo-bottom">Foto inferiore</label>
+              <input id="post-photo-bottom" name="post-photo-bottom" type="file" accept="image/*">
+            </div>
           </div>
 
           <div class="field field--zoom">
@@ -164,6 +187,7 @@
               <rect x="116" y="1840" width="170" height="76" rx="38" fill="#f7f7f4" opacity=".96" />
               <text x="201" y="1888" fill="#161615" font-family="system-ui, sans-serif" font-size="29" font-weight="700" text-anchor="middle">Rispondi</text>
             </svg>
+            <div id="post-selection-guide" aria-hidden="true" hidden></div>
           </div>
         </div>
       </section>

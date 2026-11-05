@@ -52,11 +52,11 @@ test('exposes the complete labelled editing form with exact input contracts', ()
   assert.match(elementWithId('button', 'download'), /type=["']button["'][^>]*\bdisabled\b/);
 });
 
-test('uses a Story studio eyebrow and a visible template title above composition controls', () => {
-  assert.match(html, /<p[^>]*class=["']eyebrow["'][^>]*>\s*Story studio\s*<\/p>/i);
+test('uses a Template studio eyebrow and a visible template title above composition controls', () => {
+  assert.match(html, /<p[^>]*class=["']eyebrow["'][^>]*>\s*Template studio\s*<\/p>/i);
   const editorTitle = elementWithId('h2', 'editor-title');
   assert.doesNotMatch(editorTitle, /\bclass=["']eyebrow["']/i);
-  assert.match(html, /<h2[^>]*\bid=["']editor-title["'][^>]*>\s*Instagram Story Template\s*<\/h2>/i);
+  assert.match(html, /<h2[^>]*\bid=["']editor-title["'][^>]*>\s*Instagram Template Generator\s*<\/h2>/i);
   assert.doesNotMatch(html, /Racconta il viaggio, un giorno alla volta\./i);
   assert.match(
     html,
@@ -73,7 +73,7 @@ test('uses a Story studio eyebrow and a visible template title above composition
 });
 
 test('provides a global hidden h1 before the responsive h2 sections', () => {
-  const globalTitle = html.match(/<h1\s+class=["']visually-hidden["']>Travel Story Generator<\/h1>/i);
+  const globalTitle = html.match(/<h1\s+class=["']visually-hidden["']>Instagram Template Generator<\/h1>/i);
   assert.ok(globalTitle, 'missing visually-hidden global h1');
 
   const mainStart = html.indexOf('<main class="app-shell">');
@@ -220,7 +220,7 @@ test('offers two accessible visual story template radios without a select', () =
   assert.doesNotMatch(html, /<select\b/i);
 
   assert.match(css, /\.template-picker__radio:checked\s*\+\s*\.template-option\s*\{[^}]*border-color:\s*#ff3b30/s);
-  assert.match(css, /\.template-option__check/);
+  assert.match(css, /\.template-picker__radio:checked\s*\+\s*\.template-option\s+\.template-option__check\s*\{[^}]*opacity:\s*1/s);
   assert.match(css, /@media\s*\(max-width:\s*60rem\)\s*\{[\s\S]*?\.template-picker__options\s*\{[^}]*overflow-x:\s*auto/s);
 });
 
@@ -1161,4 +1161,41 @@ test('uses the day selected when PNG generation starts for the filename', async 
     globalThis.Image = originalImage;
     globalThis.URL = originalUrl;
   }
+});
+
+test('offers a Post stack card with compact Story and Post badges', () => {
+  for (const [id, format, label] of [
+    ['cinema', 'Story', 'Fotogramma'],
+    ['postcard', 'Story', 'Cartolina corsiva'],
+    ['post-stack', 'Post', 'Stack fotografico'],
+  ]) {
+    const radio = elementWithId('input', `template-${id}`);
+    assertAttribute(radio, 'type', 'radio');
+    assertAttribute(radio, 'name', 'template');
+    assertAttribute(radio, 'value', id);
+    const card = html.match(new RegExp(`<label\\b[^>]*for=["']template-${id}["'][^>]*>([\\s\\S]*?)<\\/label>`, 'i'))?.[1];
+    assert.ok(card, `missing label for ${id}`);
+    assert.match(card, new RegExp(label));
+    assert.match(card, new RegExp(`<span class=["']template-option__badge["'][^>]*>[\\s\\S]*?${format}\\s*<\\/span>`));
+    assert.doesNotMatch(card, /1080|1920|1440|9\s*:\s*16|3\s*:\s*4/);
+  }
+  assert.match(css, /\.template-option__badge\s*\{[^}]*bottom:[^}]*right:/s);
+  assert.match(css, /\.template-thumbnail--post-stack\s*\{[^}]*aspect-ratio:\s*3\s*\/\s*4/s);
+  for (const id of ['post-photo-top', 'post-photo-bottom']) {
+    const input = elementWithId('input', id);
+    assertAttribute(input, 'type', 'file');
+    assertAttribute(input, 'accept', 'image/\\*');
+    assertVisibleLabel(id);
+  }
+  assert.ok(elementWithId('div', 'story-photo-fields'));
+  assert.match(elementWithId('div', 'post-stack-fields'), /\bhidden\b/);
+  assert.match(elementWithId('div', 'post-selection-guide'), /\bhidden\b/);
+});
+
+test('uses generic product copy and keeps format-specific copy local', () => {
+  assert.match(html, /<title>Instagram Template Generator<\/title>/);
+  assert.match(html, /<h1[^>]*>Instagram Template Generator<\/h1>/);
+  assert.match(html, /<h2[^>]*id=["']editor-title["'][^>]*>Instagram Template Generator<\/h2>/);
+  assert.match(html, /<p class=["']eyebrow["']>Template studio<\/p>/);
+  assert.match(html, /<legend>Template<\/legend>/);
 });
