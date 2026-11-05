@@ -402,6 +402,18 @@ input[type="range"] {
   color: #f7f7f4;
 }
 
+.post-slot-selector {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.post-slot-selector .button[aria-pressed="true"] {
+  border-color: #ff3b30;
+  background: #291917;
+  color: #ff8c84;
+}
+
 .button--primary {
   background: #ff3b30;
   color: #120302;

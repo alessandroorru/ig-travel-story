@@ -80,6 +80,13 @@
               <label for="post-photo-bottom">Foto inferiore</label>
               <input id="post-photo-bottom" name="post-photo-bottom" type="file" accept="image/*">
             </div>
+            <div class="field">
+              <p id="post-slot-label" class="field__hint">Foto da modificare</p>
+              <div class="post-slot-selector" role="group" aria-labelledby="post-slot-label">
+                <button id="post-select-top" type="button" class="button button--secondary" aria-label="Modifica foto superiore" aria-pressed="true">Superiore</button>
+                <button id="post-select-bottom" type="button" class="button button--secondary" aria-label="Modifica foto inferiore" aria-pressed="false">Inferiore</button>
+              </div>
+            </div>
           </div>
 
           <div class="field field--zoom">

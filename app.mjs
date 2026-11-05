@@ -26,6 +26,10 @@ const postPhotoInputs = {
   top: document.querySelector('#post-photo-top'),
   bottom: document.querySelector('#post-photo-bottom'),
 };
+const postSlotButtons = {
+  top: document.querySelector('#post-select-top'),
+  bottom: document.querySelector('#post-select-bottom'),
+};
 const canvasStage = document.querySelector('.canvas-stage');
 const previewTitle = document.querySelector('#preview-title');
 const canvasInstructions = document.querySelector('#canvas-instructions');
@@ -131,6 +135,9 @@ function syncActiveMediaPresentation() {
   const selectionHelp = isPost ? `${activeLabel} attiva.\nTocca o clicca un riquadro per selezionarlo. ` : '';
   const instructions = `${selectionHelp}Trascina la foto o usa i tasti freccia. Tieni premuto Maiusc per spostarla più velocemente. ${colorContextDescription}`;
   if (canvasInstructions.textContent !== instructions) canvasInstructions.textContent = instructions;
+  for (const [slot, button] of Object.entries(postSlotButtons)) {
+    button.setAttribute('aria-pressed', String(slot === state.activePostSlot));
+  }
   postSelectionGuide.hidden = !isPost;
   if (isPost) {
     const frame = POST_STACK_LAYOUT.frames[state.activePostSlot];
@@ -498,6 +505,10 @@ photoInput.addEventListener('change', () => {
 
 for (const [slot, input] of Object.entries(postPhotoInputs)) {
   input.addEventListener('change', () => loadPhoto(input.files?.[0], state.postSlots[slot]));
+}
+
+for (const [slot, button] of Object.entries(postSlotButtons)) {
+  button.addEventListener('click', () => selectPostSlot(slot));
 }
 
 form.addEventListener('input', (event) => {

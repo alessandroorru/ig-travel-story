@@ -312,6 +312,8 @@ function createAppFixture() {
     ['#post-stack-fields', Object.assign(new FakeElement(), { hidden: true })],
     ['#post-photo-top', new FakeElement()],
     ['#post-photo-bottom', new FakeElement()],
+    ['#post-select-top', Object.assign(new FakeElement(), { disabled: false })],
+    ['#post-select-bottom', Object.assign(new FakeElement(), { disabled: false })],
     ['#preview-title', new FakeElement()],
     ['#canvas-instructions', new FakeElement()],
     ['#instagram-preview-overlay', new FakeElement()],
@@ -1658,5 +1660,57 @@ test('ends Post pointer and touch gestures when the template changes', async () 
     });
     assert.equal(drawImageCalls.length, afterTouchSwitch);
     assert.equal(elements.get('#zoom').value, '1');
+  });
+});
+
+
+test('selects both Post photos with keyboard-accessible controls and preserves the sibling crop', async () => {
+  for (const slot of ['top', 'bottom']) {
+    const button = elementWithId('button', `post-select-${slot}`);
+    assertAttribute(button, 'type', 'button');
+    assert.doesNotMatch(button, /\bdisabled\b|tabindex=["']-1["']/);
+  }
+  await withPostInteractionApp(async ({ canvas, elements, top, bottom, drawing, select }) => {
+    const topButton = elements.get('#post-select-top');
+    const bottomButton = elements.get('#post-select-bottom');
+    assert.equal(topButton.attributes.get('aria-pressed'), 'false');
+    assert.equal(bottomButton.attributes.get('aria-pressed'), 'true', 'the last loaded photo is selected');
+
+    elements.get('#zoom').value = '1.5';
+    elements.get('#zoom').emit('input');
+    canvas.emit('keydown', { key: 'ArrowRight', preventDefault() {} });
+    canvas.emit('keydown', { key: 'ArrowUp', shiftKey: true, preventDefault() {} });
+    assert.deepEqual(drawing(bottom), [-246, 232, 1596, 1596]);
+
+    // Native buttons dispatch a click with detail=0 for keyboard activation.
+    topButton.emit('click', { detail: 0 });
+    assert.equal(topButton.attributes.get('aria-pressed'), 'true');
+    assert.equal(bottomButton.attributes.get('aria-pressed'), 'false');
+    assert.equal(elements.get('#zoom').value, '1');
+    elements.get('#zoom').value = '2';
+    elements.get('#zoom').emit('input');
+    canvas.emit('keydown', { key: 'ArrowLeft', preventDefault() {} });
+    assert.deepEqual(drawing(top), [-536, -702, 2128, 2128]);
+    assert.deepEqual(drawing(bottom), [-246, 232, 1596, 1596]);
+
+    bottomButton.emit('click', { detail: 0 });
+    assert.equal(elements.get('#zoom').value, '1.5');
+    assert.equal(elements.get('#zoom-value').value, '1,50×');
+    assert.match(elements.get('#canvas-instructions').textContent, /inferiore/i);
+    elements.get('#recenter').emit('click', { detail: 0 });
+    assert.deepEqual(drawing(bottom), [8, 546, 1064, 1064]);
+    assert.deepEqual(drawing(top), [-536, -702, 2128, 2128]);
+
+    topButton.emit('click', { detail: 0 });
+    assert.equal(elements.get('#zoom').value, '2');
+    elements.get('#recenter').emit('click', { detail: 0 });
+    assert.deepEqual(drawing(top), [8, -170, 1064, 1064]);
+    assert.deepEqual(drawing(bottom), [8, 546, 1064, 1064]);
+    assert.deepEqual(canvas.pointerCaptures, []);
+    select('cinema');
+    assert.equal(elements.get('#post-stack-fields').hidden, true, 'the selector is hidden with Post controls in Story mode');
+    select('post-stack');
+    assert.equal(elements.get('#post-stack-fields').hidden, false);
+    assert.equal(topButton.attributes.get('aria-pressed'), 'true');
   });
 });
