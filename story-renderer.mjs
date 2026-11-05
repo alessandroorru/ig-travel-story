@@ -1,3 +1,5 @@
+import { POST_STACK_LAYOUT } from './post-stack-geometry.mjs';
+
 export const CANVAS_WIDTH = 1080;
 export const CANVAS_HEIGHT = 1920;
 
@@ -64,19 +66,22 @@ function formatDayValue(value) {
   return String(Math.max(0, Math.trunc(finiteNumber(value, 0)))).padStart(2, '0');
 }
 
-export function computeImagePlacement(imageWidth, imageHeight, zoom, offsetX, offsetY) {
+export function computeImagePlacement(
+  imageWidth, imageHeight, zoom, offsetX, offsetY,
+  frameWidth = CANVAS_WIDTH, frameHeight = CANVAS_HEIGHT,
+) {
   const sourceWidth = finiteNumber(imageWidth, 0);
   const sourceHeight = finiteNumber(imageHeight, 0);
   if (sourceWidth <= 0 || sourceHeight <= 0) {
     throw new RangeError('Image dimensions must be positive.');
   }
 
-  const baseScale = Math.max(CANVAS_WIDTH / sourceWidth, CANVAS_HEIGHT / sourceHeight);
+  const baseScale = Math.max(frameWidth / sourceWidth, frameHeight / sourceHeight);
   const scale = baseScale * clamp(finiteNumber(zoom, 1), 1, 3);
   const width = sourceWidth * scale;
   const height = sourceHeight * scale;
-  const maxX = Math.max(0, (width - CANVAS_WIDTH) / 2);
-  const maxY = Math.max(0, (height - CANVAS_HEIGHT) / 2);
+  const maxX = Math.max(0, (width - frameWidth) / 2);
+  const maxY = Math.max(0, (height - frameHeight) / 2);
   const clampedOffsetX = clamp(finiteNumber(offsetX, 0), -maxX, maxX);
   const clampedOffsetY = clamp(finiteNumber(offsetY, 0), -maxY, maxY);
 
@@ -84,8 +89,8 @@ export function computeImagePlacement(imageWidth, imageHeight, zoom, offsetX, of
     scale,
     width,
     height,
-    x: (CANVAS_WIDTH - width) / 2 + clampedOffsetX,
-    y: (CANVAS_HEIGHT - height) / 2 + clampedOffsetY,
+    x: (frameWidth - width) / 2 + clampedOffsetX,
+    y: (frameHeight - height) / 2 + clampedOffsetY,
     maxX,
     maxY,
     offsetX: clampedOffsetX,
@@ -184,7 +189,49 @@ function renderPostcard(context, centerText) {
   }
 }
 
+export function renderPostStack(context, postSlots) {
+  context.save();
+  try {
+    resetCanvasTextState(context);
+    context.clearRect(0, 0, POST_STACK_LAYOUT.width, POST_STACK_LAYOUT.height);
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, POST_STACK_LAYOUT.width, POST_STACK_LAYOUT.height);
+
+    for (const [name, frame] of Object.entries(POST_STACK_LAYOUT.frames)) {
+      const slot = postSlots?.[name];
+      const image = slot?.image;
+      const imageWidth = imageDimension(image, 'naturalWidth', 'width');
+      const imageHeight = imageDimension(image, 'naturalHeight', 'height');
+      if (!image || imageWidth <= 0 || imageHeight <= 0) continue;
+
+      const placement = computeImagePlacement(
+        imageWidth, imageHeight, slot.zoom, slot.offsetX, slot.offsetY,
+        frame.width, frame.height,
+      );
+      context.save();
+      try {
+        context.beginPath();
+        context.rect(frame.x, frame.y, frame.width, frame.height);
+        context.clip();
+        context.drawImage(
+          image, frame.x + placement.x, frame.y + placement.y,
+          placement.width, placement.height,
+        );
+      } finally {
+        context.restore();
+      }
+    }
+  } finally {
+    context.restore();
+  }
+}
+
 export function renderStory(context, state) {
+  if (state?.template === 'post-stack') {
+    renderPostStack(context, state?.postSlots);
+    return;
+  }
+
   resetCanvasTextState(context);
   context.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 

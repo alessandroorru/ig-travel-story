@@ -1,23 +1,44 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import {
+import * as renderer from '../story-renderer.mjs';
+
+const {
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
   computeImagePlacement,
+  renderPostStack,
   renderStory,
   wrapText,
-} from '../story-renderer.mjs';
+} = renderer;
 
 const measureCharacters = (value) => [...value].length * 10;
 
 function createRecordingContext() {
   const calls = [];
   const gradients = [];
+  const paintedRects = [];
+  const savedStates = [];
+  const stateKeys = [
+    'fillStyle', 'font', 'textAlign', 'textBaseline', 'shadowColor',
+    'shadowBlur', 'shadowOffsetX', 'shadowOffsetY',
+  ];
 
   return {
     calls,
     gradients,
+    paintedRects,
+    save() {
+      savedStates.push(Object.fromEntries(stateKeys.map((key) => [key, this[key]])));
+      calls.push(['save']);
+    },
+    restore() {
+      Object.assign(this, savedStates.pop());
+      calls.push(['restore']);
+    },
+    beginPath: () => calls.push(['beginPath']),
+    rect: (...args) => calls.push(['rect', ...args]),
+    clip: () => calls.push(['clip']),
     createLinearGradient(...args) {
       const stops = [];
       gradients.push({ args, stops });
@@ -30,7 +51,10 @@ function createRecordingContext() {
     },
     clearRect: (...args) => calls.push(['clearRect', ...args]),
     drawImage: (...args) => calls.push(['drawImage', ...args]),
-    fillRect: (...args) => calls.push(['fillRect', ...args]),
+    fillRect(...args) {
+      calls.push(['fillRect', ...args]);
+      paintedRects.push({ args, color: this.fillStyle, shadowBlur: this.shadowBlur });
+    },
     fillText(...args) {
       calls.push(['fillText', ...args, this.fillStyle, this.font, this.textAlign, this.textBaseline]);
     },
@@ -90,6 +114,97 @@ test('clamps zoom to the inclusive one through three range', () => {
     offsetX: 0,
     offsetY: 0,
   });
+});
+
+test('computes cover placement against caller-provided frame dimensions', () => {
+  assert.deepEqual(computeImagePlacement(1064, 708, 2, 100, -50, 1064, 708), {
+    scale: 2, width: 2128, height: 1416, x: -432, y: -404,
+    maxX: 532, maxY: 354, offsetX: 100, offsetY: -50,
+  });
+  assert.deepEqual(computeImagePlacement(800, 1200, 1, 9999, -9999, 1064, 708), {
+    scale: 1.33, width: 1064, height: 1596, x: 0, y: -888,
+    maxX: 0, maxY: 444, offsetX: 0, offsetY: -444,
+  });
+});
+
+test('renders Post slots with independent crop state and exact clipping', () => {
+  const context = createRecordingContext();
+  const top = { naturalWidth: 1064, naturalHeight: 708 };
+  const bottom = { width: 1064, height: 708 };
+
+  renderStory(context, {
+    template: 'post-stack',
+    postSlots: {
+      top: { image: top, zoom: 2, offsetX: 100, offsetY: -50 },
+      bottom: { image: bottom, zoom: 1, offsetX: 999, offsetY: -999 },
+    },
+    image: { width: 1080, height: 1920 },
+    day: 7, title: 'Cinema title', notes: ['Cinema note'], centerText: 'Postcard text',
+  });
+
+  assert.deepEqual(context.calls, [
+    ['save'],
+    ['clearRect', 0, 0, 1080, 1440],
+    ['fillRect', 0, 0, 1080, 1440],
+    ['save'], ['beginPath'], ['rect', 8, 8, 1064, 708], ['clip'],
+    ['drawImage', top, -424, -396, 2128, 1416], ['restore'],
+    ['save'], ['beginPath'], ['rect', 8, 724, 1064, 708], ['clip'],
+    ['drawImage', bottom, 8, 724, 1064, 708], ['restore'],
+    ['restore'],
+  ]);
+  assert.equal(context.gradients.length, 0);
+  assert.equal(context.calls.filter(([name]) => name === 'fillText').length, 0);
+});
+
+test('leaves white borders and separator and restores canvas state', () => {
+  const context = createRecordingContext();
+  context.fillStyle = '#123456';
+  context.textAlign = 'center';
+  context.shadowBlur = 14;
+
+  renderPostStack(context, { top: null, bottom: { image: null } });
+
+  assert.deepEqual(context.paintedRects, [
+    { args: [0, 0, 1080, 1440], color: '#ffffff', shadowBlur: 0 },
+  ]);
+  assert.deepEqual(context.calls, [
+    ['save'], ['clearRect', 0, 0, 1080, 1440],
+    ['fillRect', 0, 0, 1080, 1440], ['restore'],
+  ]);
+  assert.equal(context.fillStyle, '#123456');
+  assert.equal(context.textAlign, 'center');
+  assert.equal(context.shadowBlur, 14);
+});
+
+test('renders a loaded Post sibling while skipping an empty or invalid photo', () => {
+  for (const top of [undefined, { image: { width: 0, height: 708 } }]) {
+    const context = createRecordingContext();
+    const image = { width: 1064, height: 708 };
+    renderPostStack(context, { top, bottom: { image } });
+
+    assert.deepEqual(context.calls.filter(([name]) => name === 'rect'), [
+      ['rect', 8, 724, 1064, 708],
+    ]);
+    assert.deepEqual(context.calls.filter(([name]) => name === 'drawImage'), [
+      ['drawImage', image, 8, 724, 1064, 708],
+    ]);
+  }
+});
+
+test('restores the Post clip and caller canvas state when drawing throws', () => {
+  const context = createRecordingContext();
+  context.fillStyle = '#123456';
+  context.shadowBlur = 14;
+  const drawingError = new Error('Cannot draw image');
+  context.drawImage = () => { throw drawingError; };
+
+  assert.throws(() => renderPostStack(context, {
+    top: { image: { width: 1064, height: 708 } },
+  }), (error) => error === drawingError);
+
+  assert.deepEqual(context.calls.slice(-2), [['restore'], ['restore']]);
+  assert.equal(context.fillStyle, '#123456');
+  assert.equal(context.shadowBlur, 14);
 });
 
 test('honors explicit newlines while wrapping at whitespace', () => {
