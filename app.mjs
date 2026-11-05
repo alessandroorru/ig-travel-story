@@ -5,6 +5,8 @@ import {
   renderStory,
 } from './story-renderer.mjs';
 import { calculatePinchTransform } from './touch-geometry.mjs';
+import { getTemplateDefinition } from './template-definitions.mjs';
+import { POST_STACK_LAYOUT } from './post-stack-geometry.mjs';
 
 const form = document.querySelector('#story-form');
 const appShell = document.querySelector('.app-shell');
@@ -13,10 +15,21 @@ const preview = document.querySelector('.preview');
 const templateInputs = [
   document.querySelector('#template-cinema'),
   document.querySelector('#template-postcard'),
+  document.querySelector('#template-post-stack'),
 ];
 const cinemaFields = document.querySelector('#cinema-fields');
 const postcardFields = document.querySelector('#postcard-fields');
+const storyPhotoFields = document.querySelector('#story-photo-fields');
+const postStackFields = document.querySelector('#post-stack-fields');
 const photoInput = document.querySelector('#photo');
+const postPhotoInputs = {
+  top: document.querySelector('#post-photo-top'),
+  bottom: document.querySelector('#post-photo-bottom'),
+};
+const canvasStage = document.querySelector('.canvas-stage');
+const previewTitle = document.querySelector('#preview-title');
+const canvasInstructions = document.querySelector('#canvas-instructions');
+const storyOverlay = document.querySelector('#instagram-preview-overlay');
 const dayInput = document.querySelector('#day');
 const totalDaysInput = document.querySelector('#total-days');
 const titleInput = document.querySelector('#title');
@@ -32,12 +45,16 @@ const recenterButton = document.querySelector('#recenter');
 const downloadButton = document.querySelector('#download');
 const status = document.querySelector('#status');
 const canvas = document.querySelector('#story-canvas');
-const context = canvas.getContext('2d');
+const context = createPreferredCanvasContext(canvas);
+const colorContextDescription = describeCanvasContext(context);
 
 const state = {
   template: 'cinema',
   image: null,
   imageUrl: null,
+  imageRequest: 0,
+  postSlots: { top: createMediaState(), bottom: createMediaState() },
+  activePostSlot: 'top',
   day: 1,
   totalDays: 35,
   title: 'Welcome to Kuala Lumpur',
@@ -50,8 +67,40 @@ const state = {
 
 let activePointer = null;
 let activeTouchGesture = null;
-let imageRequest = 0;
 const DAY_RANGE_ERROR = 'Il giorno deve essere un intero tra 1 e 999 e non può superare i giorni totali.';
+
+function createMediaState() {
+  return { image: null, imageUrl: null, zoom: 1, offsetX: 0, offsetY: 0, imageRequest: 0 };
+}
+
+function createPreferredCanvasContext(targetCanvas) {
+  try {
+    const preferred = targetCanvas.getContext('2d', { colorSpace: 'display-p3', colorType: 'float16' });
+    if (preferred) return preferred;
+  } catch {
+    // Browsers that reject extended color options can still render standard PNGs.
+  }
+  return targetCanvas.getContext('2d');
+}
+
+function describeCanvasContext(targetContext) {
+  let attributes;
+  try {
+    attributes = targetContext?.getContextAttributes?.();
+  } catch {
+    // Do not infer color support from accepting the requested options.
+  }
+  if (!attributes) return 'Modalità colore non verificabile dal browser.';
+  const colorSpace = attributes.colorSpace === 'display-p3' ? 'Display-P3'
+    : attributes.colorSpace === 'srgb' ? 'sRGB' : 'spazio colore non verificabile';
+  const colorType = ['float16', 'unorm8'].includes(attributes.colorType)
+    ? attributes.colorType : 'precisione non verificabile';
+  return `Anteprima: ${colorSpace}, ${colorType}.`;
+}
+
+function getActiveMediaState() {
+  return state.template === 'post-stack' ? state.postSlots[state.activePostSlot] : state;
+}
 
 function synchronizeResponsiveOrder(isMobile) {
   if (!appShell || !editor || !preview) return;
@@ -69,23 +118,33 @@ function setStatus(message) {
 }
 
 function syncZoomControl() {
-  zoomInput.value = String(state.zoom);
-  zoomValue.value = `${state.zoom.toFixed(2).replace('.', ',')}×`;
+  const media = getActiveMediaState();
+  zoomInput.value = String(media.zoom);
+  zoomValue.value = `${media.zoom.toFixed(2).replace('.', ',')}×`;
 }
 
 function selectedTemplate() {
-  return templateInputs.find((input) => input?.checked)?.value === 'postcard'
-    ? 'postcard'
-    : 'cinema';
+  return getTemplateDefinition(templateInputs.find((input) => input?.checked)?.value).id;
 }
 
-function syncTemplateFields() {
-  const isCinema = state.template !== 'postcard';
-  cinemaFields.hidden = !isCinema;
-  postcardFields.hidden = isCinema;
-  for (const input of templateInputs) {
-    input.checked = input.value === state.template;
-  }
+function syncTemplatePresentation() {
+  const definition = getTemplateDefinition(state.template);
+  const isPost = definition.format === 'post';
+  // Setting dimensions resets canvas state, so only resize when the format changes.
+  if (canvas.width !== definition.width) canvas.width = definition.width;
+  if (canvas.height !== definition.height) canvas.height = definition.height;
+  const aspectRatio = `${definition.width} / ${definition.height}`;
+  canvas.style.aspectRatio = aspectRatio;
+  canvasStage.style.aspectRatio = aspectRatio;
+  previewTitle.textContent = `${definition.width} × ${definition.height}`;
+  canvas.setAttribute('aria-label', `Anteprima ${isPost ? 'post Instagram' : 'travel story'} ${definition.width} × ${definition.height}`);
+  canvasInstructions.textContent = `Trascina la foto o usa i tasti freccia. Tieni premuto Maiusc per spostarla più velocemente. ${colorContextDescription}`;
+  storyOverlay.hidden = isPost;
+  storyPhotoFields.hidden = isPost;
+  postStackFields.hidden = !isPost;
+  cinemaFields.hidden = state.template !== 'cinema';
+  postcardFields.hidden = state.template !== 'postcard';
+  for (const input of templateInputs) input.checked = input.value === state.template;
 }
 
 function readInteger(input) {
@@ -94,7 +153,7 @@ function readInteger(input) {
 }
 
 function hasValidDayRange() {
-  if (state.template === 'postcard') return true;
+  if (state.template !== 'cinema') return true;
 
   return (
     Number.isInteger(state.day)
@@ -112,7 +171,10 @@ function updateAvailability(statusWhenValid) {
   const showDayError = state.template === 'cinema' && !validRange;
   dayInput.setAttribute('aria-invalid', String(showDayError));
   totalDaysInput.setAttribute('aria-invalid', String(showDayError));
-  downloadButton.disabled = !state.image || !validRange;
+  const hasRequiredPhotos = state.template === 'post-stack'
+    ? Boolean(state.postSlots.top.image && state.postSlots.bottom.image)
+    : Boolean(state.image);
+  downloadButton.disabled = !hasRequiredPhotos || !validRange;
 
   if (!validRange) {
     setStatus(DAY_RANGE_ERROR);
@@ -188,12 +250,17 @@ function downloadPng(blob, filename) {
 const canSharePngFile = supportsPngFileShare();
 downloadButton.textContent = canSharePngFile ? 'Salva o condividi PNG' : 'Scarica PNG';
 
+function filenameForTemplate(templateId) {
+  if (templateId === 'post-stack') return 'instagram-post-stack.png';
+  return templateId === 'postcard'
+    ? 'travel-story-postcard.png'
+    : `travel-story-day-${String(state.day).padStart(2, '0')}.png`;
+}
+
 async function exportStory() {
   if (downloadButton.disabled) return;
 
-  const filename = state.template === 'postcard'
-    ? 'travel-story-postcard.png'
-    : `travel-story-day-${String(state.day).padStart(2, '0')}.png`;
+  const filename = filenameForTemplate(state.template);
 
   if (canSharePngFile) {
     try {
@@ -237,7 +304,8 @@ function drawEmptyCanvas() {
 }
 
 function redraw() {
-  if (!state.image) {
+  syncTemplatePresentation();
+  if (state.template !== 'post-stack' && !state.image) {
     drawEmptyCanvas();
     return;
   }
@@ -246,17 +314,17 @@ function redraw() {
 }
 
 function clampOffsets() {
-  if (!state.image) return;
-
+  const media = getActiveMediaState();
+  if (!media.image) return;
+  const frame = state.template === 'post-stack'
+    ? POST_STACK_LAYOUT.frames[state.activePostSlot]
+    : { width: CANVAS_WIDTH, height: CANVAS_HEIGHT };
   const placement = computeImagePlacement(
-    state.image.naturalWidth,
-    state.image.naturalHeight,
-    state.zoom,
-    state.offsetX,
-    state.offsetY,
+    media.image.naturalWidth, media.image.naturalHeight,
+    media.zoom, media.offsetX, media.offsetY, frame.width, frame.height,
   );
-  state.offsetX = placement.offsetX;
-  state.offsetY = placement.offsetY;
+  media.offsetX = placement.offsetX;
+  media.offsetY = placement.offsetY;
 }
 
 function updateTextState() {
@@ -266,13 +334,13 @@ function updateTextState() {
   state.title = titleInput.value;
   state.notes = noteInputs.map((input) => input.value);
   state.centerText = centerTextInput.value;
-  syncTemplateFields();
+  syncZoomControl();
   updateAvailability();
   redraw();
 }
 
-function loadPhoto(file) {
-  const request = ++imageRequest;
+function loadPhoto(file, mediaState = state) {
+  const request = ++mediaState.imageRequest;
   if (!file) return;
   if (!file.type.startsWith('image/')) {
     setStatus('Scegli un file immagine valido. L’anteprima precedente non è stata modificata.');
@@ -283,17 +351,19 @@ function loadPhoto(file) {
   const nextImage = new Image();
 
   nextImage.addEventListener('load', () => {
-    if (request !== imageRequest) {
+    if (request !== mediaState.imageRequest) {
       URL.revokeObjectURL(nextUrl);
       return;
     }
 
-    const previousUrl = state.imageUrl;
-    state.image = nextImage;
-    state.imageUrl = nextUrl;
-    state.zoom = 1;
-    state.offsetX = 0;
-    state.offsetY = 0;
+    const previousUrl = mediaState.imageUrl;
+    mediaState.image = nextImage;
+    mediaState.imageUrl = nextUrl;
+    mediaState.zoom = 1;
+    mediaState.offsetX = 0;
+    mediaState.offsetY = 0;
+    const loadedSlot = Object.keys(state.postSlots).find((slot) => state.postSlots[slot] === mediaState);
+    if (loadedSlot) state.activePostSlot = loadedSlot;
     syncZoomControl();
     updateAvailability('Fotografia caricata. Puoi regolare l’inquadratura.');
     redraw();
@@ -303,7 +373,7 @@ function loadPhoto(file) {
 
   nextImage.addEventListener('error', () => {
     URL.revokeObjectURL(nextUrl);
-    if (request === imageRequest) {
+    if (request === mediaState.imageRequest) {
       setStatus('Impossibile leggere questa immagine. L’anteprima precedente non è stata modificata.');
     }
   }, { once: true });
@@ -312,9 +382,10 @@ function loadPhoto(file) {
 }
 
 function moveImage(deltaX, deltaY) {
-  if (!state.image) return;
-  state.offsetX += deltaX;
-  state.offsetY += deltaY;
+  const media = getActiveMediaState();
+  if (!media.image) return;
+  media.offsetX += deltaX;
+  media.offsetY += deltaY;
   clampOffsets();
   redraw();
 }
@@ -325,8 +396,8 @@ function getTouchGesture(touches) {
   const rect = canvas.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) return null;
 
-  const scaleX = CANVAS_WIDTH / rect.width;
-  const scaleY = CANVAS_HEIGHT / rect.height;
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
   const points = touches.map((touch) => ({
     x: (touch.clientX - rect.left) * scaleX,
     y: (touch.clientY - rect.top) * scaleY,
@@ -334,15 +405,15 @@ function getTouchGesture(touches) {
 
   return {
     centroid: {
-      x: (points[0].x + points[1].x) / 2 - CANVAS_WIDTH / 2,
-      y: (points[0].y + points[1].y) / 2 - CANVAS_HEIGHT / 2,
+      x: (points[0].x + points[1].x) / 2 - canvas.width / 2,
+      y: (points[0].y + points[1].y) / 2 - canvas.height / 2,
     },
     distance: Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y),
   };
 }
 
 function resetTouchGesture(touches) {
-  activeTouchGesture = state.image ? getTouchGesture(Array.from(touches)) : null;
+  activeTouchGesture = getActiveMediaState().image ? getTouchGesture(Array.from(touches)) : null;
 }
 
 function applyTouchGesture(touches) {
@@ -357,18 +428,17 @@ function applyTouchGesture(touches) {
     return;
   }
 
+  const media = getActiveMediaState();
   const nextState = calculatePinchTransform({
-    zoom: state.zoom,
-    offsetX: state.offsetX,
-    offsetY: state.offsetY,
+    zoom: media.zoom,
+    offsetX: media.offsetX,
+    offsetY: media.offsetY,
     previousCentroid: activeTouchGesture.centroid,
     currentCentroid: currentGesture.centroid,
     previousDistance: activeTouchGesture.distance,
     currentDistance: currentGesture.distance,
   });
-  state.zoom = nextState.zoom;
-  state.offsetX = nextState.offsetX;
-  state.offsetY = nextState.offsetY;
+  Object.assign(media, nextState);
   clampOffsets();
   syncZoomControl();
   redraw();
@@ -389,8 +459,12 @@ photoInput.addEventListener('change', () => {
   loadPhoto(photoInput.files?.[0]);
 });
 
+for (const [slot, input] of Object.entries(postPhotoInputs)) {
+  input.addEventListener('change', () => loadPhoto(input.files?.[0], state.postSlots[slot]));
+}
+
 form.addEventListener('input', (event) => {
-  if (event.target !== photoInput && event.target !== zoomInput) updateTextState();
+  if (![photoInput, ...Object.values(postPhotoInputs), zoomInput].includes(event.target)) updateTextState();
 });
 
 for (const templateInput of templateInputs) {
@@ -401,26 +475,27 @@ for (const templateInput of templateInputs) {
 }
 
 zoomInput.addEventListener('input', () => {
-  state.zoom = Number.parseFloat(zoomInput.value);
+  getActiveMediaState().zoom = Number.parseFloat(zoomInput.value);
   syncZoomControl();
   clampOffsets();
   redraw();
 });
 
 recenterButton.addEventListener('click', () => {
-  state.zoom = 1;
-  state.offsetX = 0;
-  state.offsetY = 0;
+  const media = getActiveMediaState();
+  media.zoom = 1;
+  media.offsetX = 0;
+  media.offsetY = 0;
   syncZoomControl();
   redraw();
-  updateAvailability(state.image ? 'Fotografia ricentrata.' : 'Carica una fotografia per iniziare.');
+  updateAvailability(media.image ? 'Fotografia ricentrata.' : 'Carica una fotografia per iniziare.');
 });
 
 downloadButton.addEventListener('click', exportStory);
 
 canvas.addEventListener('pointerdown', (event) => {
   if (event.pointerType === 'touch') return;
-  if (!state.image || activePointer) return;
+  if (!getActiveMediaState().image || activePointer) return;
   activePointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
   canvas.setPointerCapture(event.pointerId);
   canvas.focus();
@@ -430,8 +505,8 @@ canvas.addEventListener('pointermove', (event) => {
   if (event.pointerType === 'touch') return;
   if (!activePointer || event.pointerId !== activePointer.id) return;
 
-  const scaleX = 1080 / canvas.clientWidth;
-  const scaleY = 1920 / canvas.clientHeight;
+  const scaleX = canvas.width / canvas.clientWidth;
+  const scaleY = canvas.height / canvas.clientHeight;
   const deltaX = (event.clientX - activePointer.x) * scaleX;
   const deltaY = (event.clientY - activePointer.y) * scaleY;
   activePointer.x = event.clientX;
@@ -447,7 +522,7 @@ canvas.addEventListener('touchstart', (event) => {
 });
 
 canvas.addEventListener('touchmove', (event) => {
-  if (!state.image || event.touches.length !== 2) {
+  if (!getActiveMediaState().image || event.touches.length !== 2) {
     activeTouchGesture = null;
     return;
   }
@@ -473,12 +548,11 @@ canvas.addEventListener('keydown', (event) => {
     ArrowDown: [0, step],
   };
   const movement = movements[event.key];
-  if (!movement || !state.image) return;
+  if (!movement || !getActiveMediaState().image) return;
 
   event.preventDefault();
   moveImage(...movement);
 });
 
-syncTemplateFields();
 updateAvailability();
 redraw();

@@ -469,7 +469,7 @@ input[type="range"] {
   display: block;
   width: 100%;
   height: auto;
-  aspect-ratio: 9 / 16;
+  aspect-ratio: inherit;
   background: #10100f;
   cursor: grab;
   touch-action: pan-y;

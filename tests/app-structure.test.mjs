@@ -137,7 +137,7 @@ test('layers a non-interactive preview-only story overlay above the canvas', () 
   assert.doesNotMatch(canvasStyles, /\bbox-shadow:/);
   assert.match(css, /\.instagram-preview-overlay\s*\{[^}]*\bposition:\s*absolute\b[^}]*\binset:\s*0\b[^}]*\bz-index:\s*2\b[^}]*\boverflow:\s*hidden\b[^}]*\bpointer-events:\s*none\b/s);
   assert.doesNotMatch(renderer, /overlay/i);
-  assert.doesNotMatch(app, /instagram-preview-overlay/i);
+  assert.doesNotMatch(app.slice(app.indexOf('async function exportStory'), app.indexOf('function drawEmptyCanvas')), /instagram-preview-overlay|post-selection-guide/i);
 });
 
 test('loads only local app assets under a network-blocking content policy', () => {
@@ -167,8 +167,8 @@ test('wires pointer drag, keyboard movement and continuous zoom', () => {
   assert.match(app, /canvas\.setPointerCapture\(/);
   assert.match(app, /canvas\.addEventListener\(['"]keydown['"]/);
   assert.match(app, /event\.shiftKey\s*\?\s*48\s*:\s*12/);
-  assert.match(app, /1080\s*\/\s*canvas\.clientWidth/);
-  assert.match(app, /1920\s*\/\s*canvas\.clientHeight/);
+  assert.match(app, /canvas\.width\s*\/\s*canvas\.clientWidth/);
+  assert.match(app, /canvas\.height\s*\/\s*canvas\.clientHeight/);
   assert.match(app, /zoomInput\.addEventListener\(['"]input['"]/);
   assert.doesNotMatch(app, /zoomInput\.addEventListener\(['"]change['"]/);
   assert.match(app, /computeImagePlacement\(/);
@@ -235,6 +235,8 @@ class FakeElement {
     this.focusCalls = 0;
     this.pointerCaptures = [];
     this.attributes = new Map();
+    this.style = {};
+    this.hidden = false;
   }
 
   addEventListener(type, listener, options) {
@@ -277,6 +279,11 @@ function createAppFixture() {
   const drawImageCalls = [];
   const textCalls = [];
   const context = {
+    save() {},
+    restore() {},
+    beginPath() {},
+    rect() {},
+    clip() {},
     clearRect() {},
     fillRect() {},
     strokeRect() {},
@@ -297,6 +304,15 @@ function createAppFixture() {
     ['#story-form', new FakeElement()],
     ['#template-cinema', Object.assign(new FakeElement('cinema'), { checked: true })],
     ['#template-postcard', Object.assign(new FakeElement('postcard'), { checked: false })],
+    ['#template-post-stack', Object.assign(new FakeElement('post-stack'), { checked: false })],
+    ['#story-photo-fields', new FakeElement()],
+    ['#post-stack-fields', Object.assign(new FakeElement(), { hidden: true })],
+    ['#post-photo-top', new FakeElement()],
+    ['#post-photo-bottom', new FakeElement()],
+    ['#preview-title', new FakeElement()],
+    ['#canvas-instructions', new FakeElement()],
+    ['#instagram-preview-overlay', new FakeElement()],
+    ['.canvas-stage', new FakeElement()],
     ['#cinema-fields', new FakeElement()],
     ['#postcard-fields', Object.assign(new FakeElement(), { hidden: true })],
     ['#photo', new FakeElement()],
@@ -315,6 +331,8 @@ function createAppFixture() {
     ['#story-canvas', new FakeElement()],
   ]);
   const canvas = elements.get('#story-canvas');
+  canvas.width = 1080;
+  canvas.height = 1920;
   canvas.clientWidth = 540;
   canvas.clientHeight = 960;
   canvas.getContext = () => context;
@@ -1198,4 +1216,228 @@ test('uses generic product copy and keeps format-specific copy local', () => {
   assert.match(html, /<h2[^>]*id=["']editor-title["'][^>]*>Instagram Template Generator<\/h2>/);
   assert.match(html, /<p class=["']eyebrow["']>Template studio<\/p>/);
   assert.match(html, /<legend>Template<\/legend>/);
+});
+
+
+let asyncFixtureId = 0;
+async function withAsyncApp(run, { preferred = 'supported', attributes = { colorSpace: 'display-p3', colorType: 'float16' }, share = false } = {}) {
+  const fixture = createAppFixture();
+  const canvas = fixture.elements.get('#story-canvas');
+  const revoked = [];
+  const contexts = [];
+  const anchors = [];
+  const shares = [];
+  const renders = [];
+  const exports = [];
+  let nextUrl = 0;
+  const drawImage = fixture.context.drawImage;
+  fixture.context.drawImage = (...args) => {
+    renders.push({ width: canvas.width, height: canvas.height, image: args[0] });
+    drawImage(...args);
+  };
+  fixture.context.getContextAttributes = attributes === null ? undefined : () => attributes;
+  canvas.getContext = (...args) => {
+    contexts.push(args);
+    if (args[1] && preferred === 'throws') throw new TypeError('unsupported');
+    if (args[1] && preferred === 'null') return null;
+    return fixture.context;
+  };
+  canvas.toBlob = (callback, type) => {
+    exports.push([canvas.width, canvas.height, type]);
+    callback(new Blob(['png'], { type }));
+  };
+  canvas.toDataURL = (type) => {
+    exports.push([canvas.width, canvas.height, type]);
+    return 'data:image/png;base64,cG5n';
+  };
+  const restores = [
+    replaceGlobal('document', {
+      querySelector: (selector) => fixture.elements.get(selector),
+      createElement: () => {
+        const anchor = { click() {}, remove() {} };
+        anchors.push(anchor);
+        return anchor;
+      },
+      body: { append() {} },
+    }),
+    replaceGlobal('Image', fixture.FakeImage),
+    replaceGlobal('URL', { createObjectURL: () => `blob:async-${++nextUrl}`, revokeObjectURL: (url) => revoked.push(url) }),
+    replaceGlobal('matchMedia', undefined),
+    replaceGlobal('navigator', share ? { canShare: () => true, share: (payload) => { shares.push(payload); return Promise.resolve(); } } : {}),
+    replaceGlobal('File', FakeShareFile),
+  ];
+  function select(template) {
+    for (const id of ['cinema', 'postcard', 'post-stack']) fixture.elements.get(`#template-${id}`).checked = id === template;
+    fixture.elements.get(`#template-${template}`).emit('change');
+  }
+  function upload(selector, type = 'image/jpeg') {
+    const input = fixture.elements.get(selector);
+    input.files = [{ type }];
+    const previousCount = fixture.images.length;
+    input.emit('change');
+    return fixture.images.length > previousCount ? fixture.images.at(-1) : null;
+  }
+  async function finish(image, event = 'load') {
+    await Promise.resolve();
+    image.emit(event);
+  }
+  try {
+    await import(`${appUrl.href}?async-fixture=${++asyncFixtureId}`);
+    await run({ ...fixture, canvas, revoked, contexts, anchors, shares, renders, exports, select, upload, finish });
+  } finally {
+    for (const restore of restores.reverse()) restore();
+  }
+}
+
+test('resizes and describes the canvas for Story and Post templates', async () => {
+  await withAsyncApp(async ({ canvas, elements, renders, select, upload, finish }) => {
+    await finish(upload('#photo'));
+    assert.deepEqual([canvas.width, canvas.height], [1080, 1920]);
+    assert.equal(elements.get('#preview-title').textContent, '1080 × 1920');
+    select('post-stack');
+    await finish(upload('#post-photo-top'));
+    assert.deepEqual([canvas.width, canvas.height], [1080, 1440]);
+    assert.deepEqual([renders.at(-1).width, renders.at(-1).height], [1080, 1440], 'resize before drawing');
+    assert.equal(elements.get('#preview-title').textContent, '1080 × 1440');
+    assert.equal(elements.get('.canvas-stage').style.aspectRatio, '1080 / 1440');
+    assert.equal(canvas.style.aspectRatio, '1080 / 1440');
+    assert.match(canvas.attributes.get('aria-label'), /post.*1080.*1440/i);
+    assert.equal(elements.get('#instagram-preview-overlay').hidden, true);
+    select('postcard');
+    assert.deepEqual([canvas.width, canvas.height], [1080, 1920]);
+    assert.equal(elements.get('#instagram-preview-overlay').hidden, false);
+    assert.match(canvas.attributes.get('aria-label'), /story.*1080.*1920/i);
+  });
+});
+
+test('shows only the upload and content fields required by the active template', async () => {
+  await withAsyncApp(async ({ select, elements }) => {
+    for (const [template, expected] of [
+      ['cinema', [false, true, false, true]],
+      ['postcard', [false, true, true, false]],
+      ['post-stack', [true, false, true, true]],
+    ]) {
+      select(template);
+      assert.deepEqual(['#story-photo-fields', '#post-stack-fields', '#cinema-fields', '#postcard-fields'].map((id) => elements.get(id).hidden), expected);
+      assert.equal(elements.get(`#template-${template}`).checked, true);
+    }
+  });
+});
+
+test('keeps dual Post loads independent during success failure and replacement', async () => {
+  await withAsyncApp(async ({ select, upload, finish, drawImageCalls, revoked, elements }) => {
+    select('post-stack');
+    const top = upload('#post-photo-top');
+    const bottom = upload('#post-photo-bottom');
+    await finish(bottom);
+    await finish(top);
+    assert.equal(elements.get('#download').disabled, false);
+    assert.deepEqual(drawImageCalls.slice(-2).map(([image]) => image), [top, bottom]);
+    const stale = upload('#post-photo-top');
+    const replacement = upload('#post-photo-top');
+    await finish(replacement);
+    await finish(stale);
+    assert.deepEqual(drawImageCalls.slice(-2).map(([image]) => image), [replacement, bottom]);
+    assert.ok(revoked.includes('blob:async-1'));
+    assert.ok(revoked.includes('blob:async-3'));
+    assert.ok(!revoked.includes('blob:async-2'), 'valid sibling must retain its URL');
+    const broken = upload('#post-photo-top');
+    await finish(broken, 'error');
+    assert.equal(elements.get('#download').disabled, false, 'failed replacement preserves previous valid image');
+    assert.ok(!revoked.includes('blob:async-4'));
+    const rejectedPending = upload('#post-photo-bottom');
+    upload('#post-photo-bottom', 'text/plain');
+    await finish(rejectedPending);
+    assert.deepEqual(drawImageCalls.slice(-2).map(([image]) => image), [replacement, bottom]);
+    assert.ok(!revoked.includes('blob:async-2'));
+  });
+});
+
+test('requires both Post photos but preserves a valid sibling slot after failure', async () => {
+  await withAsyncApp(async ({ select, upload, finish, elements, revoked, drawImageCalls }) => {
+    select('post-stack');
+    await finish(upload('#photo'));
+    assert.equal(elements.get('#download').disabled, true, 'Story photo cannot satisfy Post validation');
+    const top = upload('#post-photo-top');
+    await finish(top);
+    assert.equal(elements.get('#download').disabled, true);
+    await finish(upload('#post-photo-bottom'), 'error');
+    assert.equal(elements.get('#download').disabled, true);
+    assert.ok(!revoked.includes('blob:async-2'));
+    assert.equal(drawImageCalls.at(-1)[0], top);
+    await finish(upload('#post-photo-bottom'));
+    assert.equal(elements.get('#download').disabled, false);
+    elements.get('#day').value = '999';
+    elements.get('#story-form').emit('input', { target: elements.get('#day') });
+    assert.equal(elements.get('#download').disabled, false, 'hidden Story validation must not block Post');
+  });
+});
+
+test('restores Story and Post media after repeated template switches', async () => {
+  await withAsyncApp(async ({ select, upload, finish, elements, drawImageCalls, revoked }) => {
+    const story = upload('#photo');
+    await finish(story);
+    elements.get('#zoom').value = '1.5';
+    elements.get('#zoom').emit('input');
+    select('post-stack');
+    const top = upload('#post-photo-top');
+    const bottom = upload('#post-photo-bottom');
+    await finish(top);
+    await finish(bottom);
+    elements.get('#zoom').value = '2';
+    elements.get('#zoom').emit('input');
+    for (let iteration = 0; iteration < 3; iteration++) {
+      select('cinema');
+      assert.equal(drawImageCalls.at(-1)[0], story);
+      assert.equal(elements.get('#zoom').value, '1.5');
+      select('post-stack');
+      assert.deepEqual(drawImageCalls.slice(-2).map(([image]) => image), [top, bottom]);
+      assert.equal(elements.get('#zoom').value, '2');
+    }
+    assert.deepEqual(revoked, []);
+  });
+});
+
+test('exports Post at 1080 by 1440 as instagram-post-stack.png', async () => {
+  for (const share of [false, true]) await withAsyncApp(async ({ select, upload, finish, elements, anchors, shares, exports }) => {
+    select('post-stack');
+    await finish(upload('#post-photo-top'));
+    await finish(upload('#post-photo-bottom'));
+    const pending = elements.get('#download').emit('click');
+    if (share) assert.equal(shares.length, 1, 'share starts synchronously in click activation');
+    await Promise.all(pending);
+    assert.deepEqual(exports, [[1080, 1440, 'image/png']]);
+    if (share) {
+      assert.deepEqual(Object.keys(shares[0]), ['files']);
+      assert.equal(shares[0].files.length, 1);
+      assert.equal(shares[0].files[0].name, 'instagram-post-stack.png');
+      assert.equal(shares[0].files[0].type, 'image/png');
+    } else assert.equal(anchors[0].download, 'instagram-post-stack.png');
+    assert.doesNotMatch(app.slice(app.indexOf('async function exportStory'), app.indexOf('function drawEmptyCanvas')), /post-selection-guide/);
+  }, { share });
+});
+
+test('requests Display-P3 float16 and reports the actual context mode', async () => {
+  for (const [attributes, expected] of [
+    [{ colorSpace: 'display-p3', colorType: 'float16' }, /Display-P3.*float16/i],
+    [{ colorSpace: 'srgb', colorType: 'unorm8' }, /sRGB.*unorm8/i],
+    [null, /non verificabil/i],
+  ]) await withAsyncApp(async ({ contexts, elements }) => {
+    assert.deepEqual(contexts, [['2d', { colorSpace: 'display-p3', colorType: 'float16' }]]);
+    const help = elements.get('#canvas-instructions').textContent;
+    assert.match(help, expected);
+    assert.doesNotMatch(help, /HDR/i);
+  }, { attributes });
+});
+
+test('falls back to an sRGB context without disabling preview or export', async () => {
+  for (const preferred of ['throws', 'null']) await withAsyncApp(async ({ contexts, upload, finish, elements, anchors, drawImageCalls }) => {
+    await finish(upload('#photo'));
+    assert.equal(elements.get('#download').disabled, false);
+    assert.equal(drawImageCalls.length, 1);
+    await Promise.all(elements.get('#download').emit('click'));
+    assert.equal(anchors[0].download, 'travel-story-day-01.png');
+    assert.deepEqual(contexts, [['2d', { colorSpace: 'display-p3', colorType: 'float16' }], ['2d']]);
+    assert.match(elements.get('#canvas-instructions').textContent, /sRGB.*unorm8/i);
+  }, { preferred, attributes: { colorSpace: 'srgb', colorType: 'unorm8' } });
 });
