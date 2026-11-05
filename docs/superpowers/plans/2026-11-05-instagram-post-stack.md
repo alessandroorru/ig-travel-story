@@ -19,6 +19,7 @@
 - The reference JPG is never copied into the repository.
 - Generic product copy omits “Story”; each template card has only an icon plus `Story` or `Post` in its bottom-right badge.
 - One-finger page scrolling and two-finger canvas gestures retain their current mobile behavior.
+- Request a Display-P3 float16 2D context when supported, report actual context attributes, fall back to standard sRGB, and never claim guaranteed HDR.
 
 ## Review Focus
 
@@ -27,6 +28,7 @@
 - A pinch whose touches start in different Post frames, or on the border/separator, must be ignored without moving either photo.
 - A rejected or missing Post photo must keep export disabled while preserving the valid slot and its crop.
 - PNG/Web Share output must use the active template dimensions and exclude Story chrome and Post selection guides.
+- Browsers that reject or ignore Display-P3/float16 must still preview and export correctly through an sRGB context, with truthful color-mode copy.
 
 ---
 
@@ -151,7 +153,7 @@ git commit -m "feat: render the Post photo stack"
 - Consumes: `getTemplateDefinition(templateId)` and `POST_STACK_LAYOUT`.
 - Produces: `state.postSlots.top` and `state.postSlots.bottom`, each containing `image`, `imageUrl`, `zoom`, `offsetX`, `offsetY`, and `imageRequest`.
 - Produces: `state.activePostSlot` with initial value `'top'`.
-- Produces: `getActiveMediaState()`, `syncTemplatePresentation()`, `loadPhoto(file, mediaState)`, and `filenameForTemplate(templateId)`.
+- Produces: `createPreferredCanvasContext(canvas)`, `getActiveMediaState()`, `syncTemplatePresentation()`, `loadPhoto(file, mediaState)`, and `filenameForTemplate(templateId)`.
 
 - [ ] **Step 1: Write failing application tests**
 
@@ -163,6 +165,8 @@ Add tests named:
 - `requires both Post photos but preserves a valid sibling slot after failure`
 - `restores Story and Post media after repeated template switches`
 - `exports Post at 1080 by 1440 as instagram-post-stack.png`
+- `requests Display-P3 float16 and reports the actual context mode`
+- `falls back to an sRGB context without disabling preview or export`
 
 Use an asynchronous fixture for out-of-order image load/error events. Assert the valid sibling URL is not revoked, canvas dimensions switch before redraw, Story chrome is hidden only for Post, the selection guide is never referenced by export code, and Web Share still receives only one PNG `File`.
 
@@ -170,27 +174,31 @@ Use an asynchronous fixture for out-of-order image load/error events. Assert the
 
 Run: `node --test tests/app-structure.test.mjs`
 
-Expected: FAIL because the app has one image/request token, fixed canvas dimensions, and no Post validation/export path.
+Expected: FAIL because the app has one image/request token, fixed canvas dimensions, no Post validation/export path, and creates only a default 2D context.
 
 - [ ] **Step 3: Implement format-aware state and loading**
 
 Add the two Post media states and refactor the current loader to accept its target state. Keep the Story image fields intact for compatibility. On successful Post load, activate that slot, reset only its crop, refresh controls, availability, and preview, then revoke only that slot's previous URL.
 
-- [ ] **Step 4: Implement canvas/template synchronization and validation**
+- [ ] **Step 4: Implement preferred color context with truthful fallback**
+
+Request `canvas.getContext('2d', { colorSpace: 'display-p3', colorType: 'float16' })`, then use `getContextAttributes()` when available to expose the actual `display-p3`/`float16` or standard mode in status/help copy. If the preferred request returns no context or throws, retry `canvas.getContext('2d')`. Never label the result HDR.
+
+- [ ] **Step 5: Implement canvas/template synchronization and validation**
 
 Before redraw, apply the active definition's width/height, CSS aspect ratio, preview heading, accessible description, Story overlay visibility, field groups, and selected radio. Require one valid image for Story templates and both valid Post images for `post-stack`.
 
-- [ ] **Step 5: Implement format-aware export naming**
+- [ ] **Step 6: Implement format-aware export naming**
 
 Return `instagram-post-stack.png` for `post-stack`, preserve existing filenames for `cinema` and `postcard`, and leave the synchronous iOS Web Share path unchanged.
 
-- [ ] **Step 6: Run focused and full tests and verify GREEN**
+- [ ] **Step 7: Run focused and full tests and verify GREEN**
 
 Run: `node --test tests/app-structure.test.mjs && node --test tests/*.test.mjs`
 
 Expected: both commands PASS.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add app.mjs styles.css tests/app-structure.test.mjs
@@ -244,7 +252,7 @@ Position the DOM guide over the active frame, hide it outside Post mode, set `po
 
 - [ ] **Step 6: Update user documentation**
 
-Document the third template, 1080 × 1440 output, two required uploads, active-slot controls, uniform 8 px border/separator, and independent desktop/mobile crop behavior.
+Document the third template, 1080 × 1440 output, two required uploads, active-slot controls, uniform 8 px border/separator, independent desktop/mobile crop behavior, Display-P3 best effort, and sRGB fallback. Explicitly state that composed PNG export does not guarantee HDR metadata or gain-map preservation.
 
 - [ ] **Step 7: Run the complete verification gate**
 

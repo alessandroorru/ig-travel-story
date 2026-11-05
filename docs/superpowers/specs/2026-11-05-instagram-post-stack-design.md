@@ -13,6 +13,7 @@ L'immagine `SCRL_0015.JPG` è soltanto un riferimento di proporzioni. Non viene 
 - Conservare invariati i due template esistenti e i relativi export 1080 × 1920.
 - Gestire due fotografie con caricamento, crop, zoom, offset e ricentramento indipendenti.
 - Mantenere tutto locale nel browser, senza persistenza, backend o dipendenze runtime.
+- Preservare la gamma colore Display-P3 con precisione float16 quando il browser la supporta, con fallback sRGB; non promettere né dichiarare HDR end-to-end.
 
 ## Non obiettivi
 
@@ -120,6 +121,12 @@ Cambiare `canvas.width` o `canvas.height` azzera il context: ogni switch di temp
 - Web Share su iOS e fallback download restano invariati.
 - Il file Post è sempre 1080 × 1440; i template Story restano 1080 × 1920.
 
+## Colore e limite HDR
+
+L'app richiede il context 2D con `colorSpace: 'display-p3'` e `colorType: 'float16'`. Se il browser non espone questa combinazione, ricade sul context 2D standard sRGB senza bloccare editing o export. Quando disponibile, `getContextAttributes()` viene usato per mostrare la modalità effettiva e non quella soltanto richiesta.
+
+L'export rimane PNG tramite Canvas. Safari/WebKit può incorporare il profilo Display-P3, ma il browser non offre una garanzia standard di conservare gain map o metadati HDR nel file composto. Perciò l'interfaccia e la documentazione usano `Display-P3` o `colore standard`, mai `HDR preservato`.
+
 ## Accessibilità e responsive
 
 - Le schede restano radio con label completa e descrizione del formato.
@@ -144,6 +151,7 @@ Test automatici Node devono coprire:
 - clipping e assenza di contaminazione tra i due riquadri;
 - overlay UI esclusi dall'export;
 - filename e risoluzione PNG corretti;
+- richiesta Display-P3/float16, rilevamento della modalità effettiva e fallback sRGB;
 - assenza di regressioni nei template Story e nella condivisione iOS.
 
 La verifica manuale include desktop e viewport mobile, caricamento di due foto diverse, switch ripetuti tra tutti i template, gesture indipendenti e controllo visivo del PNG esportato.
