@@ -56,3 +56,20 @@ test('clamps pinch zoom and uses the actual ratio for the anchored offset', () =
     { zoom: 1, offsetX: 50, offsetY: 5 },
   );
 });
+
+
+test('calculates touch centroids relative to each Post frame center', () => {
+  assert.equal(typeof geometry.calculateTouchGeometry, 'function');
+  assert.deepEqual(geometry.calculateTouchGeometry(
+    [{ x: 340, y: 362 }, { x: 540, y: 362 }],
+    { x: 8, y: 8, width: 1064, height: 708 },
+  ), { centroid: { x: -100, y: 0 }, distance: 200 });
+  assert.deepEqual(geometry.calculateTouchGeometry(
+    [{ x: 340, y: 1098 }, { x: 640, y: 1098 }],
+    { x: 8, y: 724, width: 1064, height: 708 },
+  ), { centroid: { x: -50, y: 20 }, distance: 300 });
+  assert.deepEqual(geometry.calculateTouchGeometry(
+    [{ x: 340, y: 960 }, { x: 540, y: 960 }],
+    { x: 0, y: 0, width: 1080, height: 1920 },
+  ), { centroid: { x: -100, y: 0 }, distance: 200 });
+});

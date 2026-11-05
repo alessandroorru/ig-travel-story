@@ -4,9 +4,9 @@ import {
   computeImagePlacement,
   renderStory,
 } from './story-renderer.mjs';
-import { calculatePinchTransform } from './touch-geometry.mjs';
+import { calculatePinchTransform, calculateTouchGeometry } from './touch-geometry.mjs';
 import { getTemplateDefinition } from './template-definitions.mjs';
-import { POST_STACK_LAYOUT } from './post-stack-geometry.mjs';
+import { POST_STACK_LAYOUT, postSlotAtPoint } from './post-stack-geometry.mjs';
 
 const form = document.querySelector('#story-form');
 const appShell = document.querySelector('.app-shell');
@@ -30,6 +30,8 @@ const canvasStage = document.querySelector('.canvas-stage');
 const previewTitle = document.querySelector('#preview-title');
 const canvasInstructions = document.querySelector('#canvas-instructions');
 const storyOverlay = document.querySelector('#instagram-preview-overlay');
+const postSelectionGuide = document.querySelector('#post-selection-guide');
+canvasInstructions.setAttribute('aria-live', 'polite');
 const dayInput = document.querySelector('#day');
 const totalDaysInput = document.querySelector('#total-days');
 const titleInput = document.querySelector('#title');
@@ -123,6 +125,31 @@ function syncZoomControl() {
   zoomValue.value = `${media.zoom.toFixed(2).replace('.', ',')}×`;
 }
 
+function syncActiveMediaPresentation() {
+  const isPost = state.template === 'post-stack';
+  const activeLabel = state.activePostSlot === 'top' ? 'Foto superiore' : 'Foto inferiore';
+  const selectionHelp = isPost ? `${activeLabel} attiva.\nTocca o clicca un riquadro per selezionarlo. ` : '';
+  const instructions = `${selectionHelp}Trascina la foto o usa i tasti freccia. Tieni premuto Maiusc per spostarla più velocemente. ${colorContextDescription}`;
+  if (canvasInstructions.textContent !== instructions) canvasInstructions.textContent = instructions;
+  postSelectionGuide.hidden = !isPost;
+  if (isPost) {
+    const frame = POST_STACK_LAYOUT.frames[state.activePostSlot];
+    Object.assign(postSelectionGuide.style, {
+      left: `${frame.x / canvas.width * 100}%`,
+      top: `${frame.y / canvas.height * 100}%`,
+      width: `${frame.width / canvas.width * 100}%`,
+      height: `${frame.height / canvas.height * 100}%`,
+    });
+  }
+}
+
+function selectPostSlot(slot) {
+  if (!slot) return;
+  state.activePostSlot = slot;
+  syncZoomControl();
+  syncActiveMediaPresentation();
+}
+
 function selectedTemplate() {
   return getTemplateDefinition(templateInputs.find((input) => input?.checked)?.value).id;
 }
@@ -138,8 +165,8 @@ function syncTemplatePresentation() {
   canvasStage.style.aspectRatio = aspectRatio;
   previewTitle.textContent = `${definition.width} × ${definition.height}`;
   canvas.setAttribute('aria-label', `Anteprima ${isPost ? 'post Instagram' : 'travel story'} ${definition.width} × ${definition.height}`);
-  canvasInstructions.textContent = `Trascina la foto o usa i tasti freccia. Tieni premuto Maiusc per spostarla più velocemente. ${colorContextDescription}`;
-  storyOverlay.hidden = isPost;
+  syncActiveMediaPresentation();
+  storyOverlay.toggleAttribute('hidden', isPost);
   storyPhotoFields.hidden = isPost;
   postStackFields.hidden = !isPost;
   cinemaFields.hidden = state.template !== 'cinema';
@@ -313,12 +340,11 @@ function redraw() {
   renderStory(context, state);
 }
 
-function clampOffsets() {
-  const media = getActiveMediaState();
+function clampOffsets(media = getActiveMediaState(), slot = state.template === 'post-stack' ? state.activePostSlot : null) {
   if (!media.image) return;
-  const frame = state.template === 'post-stack'
-    ? POST_STACK_LAYOUT.frames[state.activePostSlot]
-    : { width: CANVAS_WIDTH, height: CANVAS_HEIGHT };
+  const frame = slot
+    ? POST_STACK_LAYOUT.frames[slot]
+    : { width: canvas.width, height: canvas.height };
   const placement = computeImagePlacement(
     media.image.naturalWidth, media.image.naturalHeight,
     media.zoom, media.offsetX, media.offsetY, frame.width, frame.height,
@@ -328,7 +354,12 @@ function clampOffsets() {
 }
 
 function updateTextState() {
-  state.template = selectedTemplate();
+  const template = selectedTemplate();
+  if (template !== state.template) {
+    if (activePointer) finishPointer({ pointerId: activePointer.id });
+    activeTouchGesture = null;
+  }
+  state.template = template;
   state.day = readInteger(dayInput);
   state.totalDays = readInteger(totalDaysInput);
   state.title = titleInput.value;
@@ -381,54 +412,59 @@ function loadPhoto(file, mediaState = state) {
   nextImage.src = nextUrl;
 }
 
-function moveImage(deltaX, deltaY) {
-  const media = getActiveMediaState();
+function moveImage(deltaX, deltaY, media = getActiveMediaState(), slot = state.template === 'post-stack' ? state.activePostSlot : null) {
   if (!media.image) return;
   media.offsetX += deltaX;
   media.offsetY += deltaY;
-  clampOffsets();
+  clampOffsets(media, slot);
   redraw();
+}
+
+function canvasPointFromClient(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
+  return {
+    x: (clientX - rect.left) * canvas.width / rect.width,
+    y: (clientY - rect.top) * canvas.height / rect.height,
+  };
 }
 
 function getTouchGesture(touches) {
   if (touches.length !== 2) return null;
+  const points = touches.map((touch) => canvasPointFromClient(touch.clientX, touch.clientY));
+  if (points.some((point) => !point)) return null;
 
-  const rect = canvas.getBoundingClientRect();
-  if (rect.width <= 0 || rect.height <= 0) return null;
-
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
-  const points = touches.map((touch) => ({
-    x: (touch.clientX - rect.left) * scaleX,
-    y: (touch.clientY - rect.top) * scaleY,
-  }));
-
-  return {
-    centroid: {
-      x: (points[0].x + points[1].x) / 2 - canvas.width / 2,
-      y: (points[0].y + points[1].y) / 2 - canvas.height / 2,
-    },
-    distance: Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y),
-  };
+  let slot = null;
+  let frame = { x: 0, y: 0, width: canvas.width, height: canvas.height };
+  if (state.template === 'post-stack') {
+    slot = postSlotAtPoint(points[0].x, points[0].y);
+    if (!slot || slot !== postSlotAtPoint(points[1].x, points[1].y)) return null;
+    frame = POST_STACK_LAYOUT.frames[slot];
+  }
+  return { slot, ...calculateTouchGeometry(points, frame) };
 }
 
 function resetTouchGesture(touches) {
-  activeTouchGesture = getActiveMediaState().image ? getTouchGesture(Array.from(touches)) : null;
+  const gesture = getTouchGesture(Array.from(touches));
+  if (gesture?.slot) selectPostSlot(gesture.slot);
+  const media = gesture?.slot ? state.postSlots[gesture.slot] : state;
+  activeTouchGesture = media.image ? gesture : null;
 }
 
 function applyTouchGesture(touches) {
+  if (!activeTouchGesture) return false;
   const currentGesture = getTouchGesture(Array.from(touches));
-  if (!currentGesture) {
-    activeTouchGesture = null;
-    return;
+  if (!currentGesture || currentGesture.slot !== activeTouchGesture.slot) {
+    // Retain the original target, and rebase if the fingers return to it.
+    activeTouchGesture.centroid = null;
+    return false;
   }
-
-  if (!activeTouchGesture) {
+  if (!activeTouchGesture.centroid) {
     activeTouchGesture = currentGesture;
-    return;
+    return true;
   }
 
-  const media = getActiveMediaState();
+  const media = currentGesture.slot ? state.postSlots[currentGesture.slot] : state;
   const nextState = calculatePinchTransform({
     zoom: media.zoom,
     offsetX: media.offsetX,
@@ -439,10 +475,11 @@ function applyTouchGesture(touches) {
     currentDistance: currentGesture.distance,
   });
   Object.assign(media, nextState);
-  clampOffsets();
+  clampOffsets(media, currentGesture.slot);
   syncZoomControl();
   redraw();
   activeTouchGesture = currentGesture;
+  return true;
 }
 
 function finishPointer(event) {
@@ -494,9 +531,17 @@ recenterButton.addEventListener('click', () => {
 downloadButton.addEventListener('click', exportStory);
 
 canvas.addEventListener('pointerdown', (event) => {
-  if (event.pointerType === 'touch') return;
-  if (!getActiveMediaState().image || activePointer) return;
-  activePointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+  if (event.pointerType === 'touch' || activePointer) return;
+  const point = canvasPointFromClient(event.clientX, event.clientY);
+  if (!point) return;
+  const slot = state.template === 'post-stack' ? postSlotAtPoint(point.x, point.y) : null;
+  if (state.template === 'post-stack') {
+    if (!slot) return;
+    selectPostSlot(slot);
+  }
+  const media = getActiveMediaState();
+  if (!media.image) return;
+  activePointer = { id: event.pointerId, point, media, slot };
   canvas.setPointerCapture(event.pointerId);
   canvas.focus();
 });
@@ -504,31 +549,33 @@ canvas.addEventListener('pointerdown', (event) => {
 canvas.addEventListener('pointermove', (event) => {
   if (event.pointerType === 'touch') return;
   if (!activePointer || event.pointerId !== activePointer.id) return;
-
-  const scaleX = canvas.width / canvas.clientWidth;
-  const scaleY = canvas.height / canvas.clientHeight;
-  const deltaX = (event.clientX - activePointer.x) * scaleX;
-  const deltaY = (event.clientY - activePointer.y) * scaleY;
-  activePointer.x = event.clientX;
-  activePointer.y = event.clientY;
-  moveImage(deltaX, deltaY);
+  const point = canvasPointFromClient(event.clientX, event.clientY);
+  if (!point) return;
+  const deltaX = point.x - activePointer.point.x;
+  const deltaY = point.y - activePointer.point.y;
+  activePointer.point = point;
+  moveImage(deltaX, deltaY, activePointer.media, activePointer.slot);
 });
 
 canvas.addEventListener('pointerup', finishPointer);
 canvas.addEventListener('pointercancel', finishPointer);
 
 canvas.addEventListener('touchstart', (event) => {
+  if (state.template === 'post-stack' && event.touches.length === 1) {
+    const touch = event.touches[0];
+    const point = canvasPointFromClient(touch.clientX, touch.clientY);
+    if (point) selectPostSlot(postSlotAtPoint(point.x, point.y));
+  }
   resetTouchGesture(event.touches);
 });
 
 canvas.addEventListener('touchmove', (event) => {
-  if (!getActiveMediaState().image || event.touches.length !== 2) {
+  if (event.touches.length !== 2 || event.cancelable === false) {
     activeTouchGesture = null;
     return;
   }
 
-  event.preventDefault();
-  applyTouchGesture(event.touches);
+  if (applyTouchGesture(event.touches)) event.preventDefault();
 }, { passive: false });
 
 canvas.addEventListener('touchend', (event) => {

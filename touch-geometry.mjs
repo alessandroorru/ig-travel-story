@@ -19,3 +19,13 @@ export function calculatePinchTransform({
     offsetY: currentCentroid.y - (previousCentroid.y - offsetY) * actualZoomRatio,
   };
 }
+
+export function calculateTouchGeometry(points, frame) {
+  return {
+    centroid: {
+      x: (points[0].x + points[1].x) / 2 - frame.x - frame.width / 2,
+      y: (points[0].y + points[1].y) / 2 - frame.y - frame.height / 2,
+    },
+    distance: Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y),
+  };
+}

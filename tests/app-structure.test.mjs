@@ -167,8 +167,6 @@ test('wires pointer drag, keyboard movement and continuous zoom', () => {
   assert.match(app, /canvas\.setPointerCapture\(/);
   assert.match(app, /canvas\.addEventListener\(['"]keydown['"]/);
   assert.match(app, /event\.shiftKey\s*\?\s*48\s*:\s*12/);
-  assert.match(app, /canvas\.width\s*\/\s*canvas\.clientWidth/);
-  assert.match(app, /canvas\.height\s*\/\s*canvas\.clientHeight/);
   assert.match(app, /zoomInput\.addEventListener\(['"]input['"]/);
   assert.doesNotMatch(app, /zoomInput\.addEventListener\(['"]change['"]/);
   assert.match(app, /computeImagePlacement\(/);
@@ -255,6 +253,11 @@ class FakeElement {
   }
 
   setAttribute(name, value) { this.attributes.set(name, value); }
+  toggleAttribute(name, enabled) {
+    if (enabled) this.attributes.set(name, '');
+    else this.attributes.delete(name);
+    if (name === 'hidden') this.hidden = enabled;
+  }
   focus() { this.focusCalls += 1; }
   setPointerCapture(pointerId) { this.pointerCaptures.push(pointerId); }
   releasePointerCapture() {}
@@ -312,6 +315,7 @@ function createAppFixture() {
     ['#preview-title', new FakeElement()],
     ['#canvas-instructions', new FakeElement()],
     ['#instagram-preview-overlay', new FakeElement()],
+    ['#post-selection-guide', Object.assign(new FakeElement(), { hidden: true })],
     ['.canvas-stage', new FakeElement()],
     ['#cinema-fields', new FakeElement()],
     ['#postcard-fields', Object.assign(new FakeElement(), { hidden: true })],
@@ -1440,4 +1444,219 @@ test('falls back to an sRGB context without disabling preview or export', async 
     assert.deepEqual(contexts, [['2d', { colorSpace: 'display-p3', colorType: 'float16' }], ['2d']]);
     assert.match(elements.get('#canvas-instructions').textContent, /sRGB.*unorm8/i);
   }, { preferred, attributes: { colorSpace: 'srgb', colorType: 'unorm8' } });
+});
+
+
+async function withPostInteractionApp(run) {
+  await withAsyncApp(async (fixture) => {
+    fixture.select('post-stack');
+    const top = fixture.upload('#post-photo-top');
+    const bottom = fixture.upload('#post-photo-bottom');
+    for (const image of [top, bottom]) {
+      image.naturalWidth = 1200;
+      image.naturalHeight = 1200;
+      await fixture.finish(image);
+    }
+    // Deliberately differ from clientWidth/clientHeight to catch coordinate-scale bugs.
+    fixture.canvas.getBoundingClientRect = () => ({ left: 40, top: 60, width: 270, height: 360 });
+    function point(x, y) { return { clientX: 40 + x / 4, clientY: 60 + y / 4 }; }
+    function pointer(type, x, y, pointerId = 1, extra = {}) {
+      fixture.canvas.emit(type, { pointerType: 'mouse', pointerId, ...point(x, y), ...extra });
+    }
+    function drawing(image) {
+      return fixture.drawImageCalls.findLast(([drawnImage]) => drawnImage === image).slice(1);
+    }
+    await run({ ...fixture, top, bottom, point, pointer, drawing });
+  });
+}
+
+test('selects and drags only the Post frame where pointerdown begins', async () => {
+  await withPostInteractionApp(async ({ canvas, elements, top, bottom, pointer, drawing, drawImageCalls }) => {
+    pointer('pointerdown', 540, 362);
+    pointer('pointerup', 540, 362);
+    elements.get('#zoom').value = '2';
+    elements.get('#zoom').emit('input');
+    assert.deepEqual(drawing(top), [-524, -702, 2128, 2128]);
+    assert.deepEqual(drawing(bottom), [8, 546, 1064, 1064]);
+
+    pointer('pointerdown', 540, 362, 2);
+    pointer('pointermove', 900, 900, 99);
+    assert.deepEqual(drawing(top), [-524, -702, 2128, 2128], 'another pointer cannot move the crop');
+    pointer('pointermove', 580, 760, 2);
+    assert.deepEqual(drawing(top), [-484, -304, 2128, 2128], 'crossing the separator retains the original drag target');
+    assert.deepEqual(drawing(bottom), [8, 546, 1064, 1064]);
+    pointer('pointerup', 580, 760, 2);
+
+    const count = drawImageCalls.length;
+    const captures = canvas.pointerCaptures.length;
+    for (const [x, y] of [[4, 362], [540, 720], [1076, 1078], [540, 1436]]) {
+      pointer('pointerdown', x, y, 3);
+      pointer('pointermove', 600, 1100, 3);
+      pointer('pointerup', 600, 1100, 3);
+    }
+    assert.equal(drawImageCalls.length, count, 'border and separator starts are inert');
+    assert.equal(canvas.pointerCaptures.length, captures);
+    assert.match(elements.get('#canvas-instructions').textContent, /superiore/i);
+  });
+});
+
+test('routes zoom recenter and keyboard movement to the active Post slot', async () => {
+  await withPostInteractionApp(async ({ canvas, elements, top, bottom, pointer, drawing }) => {
+    elements.get('#zoom').value = '1.5';
+    elements.get('#zoom').emit('input');
+    canvas.emit('keydown', { key: 'ArrowRight', preventDefault() {} });
+    canvas.emit('keydown', { key: 'ArrowUp', shiftKey: true, preventDefault() {} });
+    assert.deepEqual(drawing(bottom), [-246, 232, 1596, 1596]);
+    assert.deepEqual(drawing(top), [8, -170, 1064, 1064]);
+
+    pointer('pointerdown', 540, 362);
+    pointer('pointerup', 540, 362);
+    assert.equal(elements.get('#zoom').value, '1');
+    assert.equal(elements.get('#zoom-value').value, '1,00×');
+    assert.match(elements.get('#canvas-instructions').textContent, /superiore/i);
+    elements.get('#zoom').value = '2';
+    elements.get('#zoom').emit('input');
+    canvas.emit('keydown', { key: 'ArrowLeft', preventDefault() {} });
+    assert.deepEqual(drawing(top), [-536, -702, 2128, 2128]);
+    assert.deepEqual(drawing(bottom), [-246, 232, 1596, 1596]);
+
+    pointer('pointerdown', 540, 1078);
+    pointer('pointerup', 540, 1078);
+    assert.equal(elements.get('#zoom').value, '1.5');
+    assert.equal(elements.get('#zoom-value').value, '1,50×');
+    assert.match(elements.get('#canvas-instructions').textContent, /inferiore/i);
+    elements.get('#recenter').emit('click');
+    assert.deepEqual(drawing(bottom), [8, 546, 1064, 1064]);
+    assert.deepEqual(drawing(top), [-536, -702, 2128, 2128]);
+    pointer('pointerdown', 540, 362);
+    pointer('pointerup', 540, 362);
+    assert.equal(elements.get('#zoom').value, '2', 'selection and recenter preserve the sibling zoom');
+  });
+});
+
+test('anchors a same-frame Post pinch and ignores cross-frame or gap touches', async () => {
+  await withPostInteractionApp(async ({ canvas, elements, top, bottom, point, drawing, drawImageCalls }) => {
+    const pair = (x1, y1, x2, y2) => [
+      { identifier: 1, ...point(x1, y1) },
+      { identifier: 2, ...point(x2, y2) },
+    ];
+    canvas.emit('touchstart', { touches: pair(340, 362, 540, 362) });
+    let prevented = 0;
+    canvas.emit('touchmove', { touches: pair(340, 382, 640, 382), preventDefault() { prevented++; } });
+    assert.equal(prevented, 1);
+    assert.equal(elements.get('#zoom').value, '1.5');
+    assert.deepEqual(drawing(top), [-158, -416, 1596, 1596], 'pinch anchors relative to the top frame center');
+    assert.deepEqual(drawing(bottom), [8, 546, 1064, 1064]);
+    assert.match(elements.get('#canvas-instructions').textContent, /superiore/i);
+
+    const count = drawImageCalls.length;
+    for (const invalid of [pair(340, 362, 540, 1078), pair(340, 362, 540, 720), pair(4, 362, 540, 362)]) {
+      canvas.emit('touchstart', { touches: invalid });
+      canvas.emit('touchmove', { touches: invalid, preventDefault() { assert.fail('invalid Post gestures remain native'); } });
+    }
+    assert.equal(drawImageCalls.length, count);
+
+    canvas.emit('touchstart', { touches: pair(340, 362, 540, 362) });
+    for (let move = 0; move < 2; move++) {
+      canvas.emit('touchmove', { touches: pair(340, 1078, 640, 1078), preventDefault() {} });
+    }
+    assert.equal(drawImageCalls.length, count, 'a gesture cannot migrate from top to bottom');
+    canvas.emit('touchend', { touches: [] });
+    canvas.emit('touchstart', { touches: pair(340, 1078, 540, 1078) });
+    canvas.emit('touchmove', { touches: pair(340, 1098, 640, 1098), preventDefault() {} });
+    assert.deepEqual(drawing(bottom), [-158, 300, 1596, 1596], 'a new bottom gesture uses the bottom frame center');
+    assert.deepEqual(drawing(top), [-158, -416, 1596, 1596]);
+  });
+});
+
+test('keeps one-finger page scrolling native in Post mode', async () => {
+  await withPostInteractionApp(async ({ canvas, elements, point, drawImageCalls }) => {
+    const touch = { identifier: 1, ...point(540, 362) };
+    canvas.emit('pointerdown', { pointerType: 'touch', pointerId: 1, ...touch });
+    canvas.emit('touchstart', { touches: [touch], preventDefault() { assert.fail('one finger must stay native'); } });
+    const count = drawImageCalls.length;
+    canvas.emit('touchmove', {
+      touches: [{ ...touch, ...point(540, 1078) }],
+      preventDefault() { assert.fail('one-finger page scroll must not be blocked'); },
+    });
+    canvas.emit('touchend', { touches: [] });
+    assert.equal(drawImageCalls.length, count);
+    assert.deepEqual(canvas.pointerCaptures, []);
+    assert.match(elements.get('#canvas-instructions').textContent, /superiore/i, 'a touch selects its starting slot');
+    assert.match(css, /#story-canvas\s*\{[^}]*touch-action:\s*pan-y/s);
+  });
+});
+
+test('keeps the active-frame guide outside the exported canvas', async () => {
+  await withPostInteractionApp(async ({ canvas, elements, top, bottom, pointer, drawing, select, exports, drawImageCalls }) => {
+    const guide = elements.get('#post-selection-guide');
+    assert.equal(guide.hidden, false);
+    for (const [slot, y] of [['top', 8], ['bottom', 724]]) {
+      pointer('pointerdown', 540, slot === 'top' ? 362 : 1078);
+      pointer('pointerup', 540, slot === 'top' ? 362 : 1078);
+      for (const [property, expected, dimension] of [
+        ['left', 8, canvas.width], ['top', y, canvas.height],
+        ['width', 1064, canvas.width], ['height', 708, canvas.height],
+      ]) {
+        assert.ok(Math.abs(Number.parseFloat(guide.style[property]) * dimension / 100 - expected) < 0.00001, `${slot} guide ${property}`);
+      }
+    }
+    assert.match(css, /#post-selection-guide\s*\{[^}]*position:\s*absolute[^}]*pointer-events:\s*none/s);
+    const before = [drawing(top), drawing(bottom)];
+    await Promise.all(elements.get('#download').emit('click'));
+    assert.deepEqual(exports, [[1080, 1440, 'image/png']]);
+    assert.deepEqual([drawing(top), drawing(bottom)], before);
+    assert.ok(drawImageCalls.every(([image]) => image !== guide));
+    select('cinema');
+    assert.equal(guide.hidden, true);
+    select('post-stack');
+    assert.equal(guide.hidden, false);
+    assert.match(elements.get('#canvas-instructions').textContent, /inferiore/i);
+  });
+});
+
+
+test('sets a real hidden attribute on the SVG Story overlay in Post mode', async () => {
+  await withAsyncApp(async ({ select, elements }) => {
+    const overlay = elements.get('#instagram-preview-overlay');
+    select('post-stack');
+    assert.equal(overlay.attributes.has('hidden'), true, 'SVG requires the actual attribute rather than a hidden JavaScript property');
+    select('cinema');
+    assert.equal(overlay.attributes.has('hidden'), false);
+  });
+});
+
+
+test('ignores non-cancelable touch moves once the browser owns page scrolling', async () => {
+  await withPostInteractionApp(async ({ canvas, point, drawImageCalls }) => {
+    canvas.emit('touchstart', { touches: [point(340, 362), point(540, 362)] });
+    const count = drawImageCalls.length;
+    canvas.emit('touchmove', {
+      touches: [point(340, 382), point(640, 382)],
+      cancelable: false,
+      preventDefault() { assert.fail('a browser-owned scroll cannot be canceled'); },
+    });
+    assert.equal(drawImageCalls.length, count, 'native scroll must not also edit a photo');
+  });
+});
+
+test('ends Post pointer and touch gestures when the template changes', async () => {
+  await withPostInteractionApp(async ({ canvas, elements, pointer, point, select, drawImageCalls }) => {
+    pointer('pointerdown', 540, 362);
+    select('cinema');
+    select('post-stack');
+    const afterPointerSwitch = drawImageCalls.length;
+    pointer('pointermove', 580, 382);
+    assert.equal(drawImageCalls.length, afterPointerSwitch, 'stale captured pointer cannot edit a restored Post');
+    canvas.emit('touchstart', { touches: [point(340, 362), point(540, 362)] });
+    select('postcard');
+    select('post-stack');
+    const afterTouchSwitch = drawImageCalls.length;
+    canvas.emit('touchmove', {
+      touches: [point(340, 382), point(640, 382)],
+      preventDefault() { assert.fail('a stale pinch cannot capture page scrolling'); },
+    });
+    assert.equal(drawImageCalls.length, afterTouchSwitch);
+    assert.equal(elements.get('#zoom').value, '1');
+  });
 });
