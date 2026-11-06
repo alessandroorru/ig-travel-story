@@ -14,7 +14,7 @@ Poi visita [http://localhost:8000](http://localhost:8000).
 
 1. Scegli un template dalla galleria. **Fotogramma** (Cinema) e **Cartolina corsiva** hanno badge Story. **Stack fotografico** e **Stack fotografico ×4** hanno badge Post.
 2. Carica una fotografia per una Story, due per Stack fotografico o quattro per Stack fotografico ×4. Fotogramma usa giorno, giorni totali, titolo e fino a tre osservazioni. Cartolina corsiva usa solo il testo centrale, fino a cinque righe. Gli Stack contengono soltanto le fotografie.
-3. Su desktop, trascina la foto con mouse o penna, usa le frecce quando l'anteprima ha il focus (Maiusc per passi più ampi) e regola lo zoom con lo slider continuo.
+3. Trascina la foto con mouse o penna e regola lo zoom con lo slider su desktop. Da tastiera, porta il focus sull'anteprima e usa le frecce per spostare la foto (Maiusc per passi più ampi) oppure **+** e **−** per lo zoom.
 4. Su mobile, un dito continua a far scorrere la pagina; usa due dita per spostare e ingrandire/ridurre la foto, tra 1× e 3×. **Ricentra** ripristina posizione e zoom.
 5. Su mobile compatibile, premi **Salva o condividi PNG** e nel foglio nativo scegli **Salva immagine**. Se la condivisione file non è disponibile, premi **Scarica PNG**. La risoluzione segue il template: 1080 × 1920 per Story, 1080 × 1440 per Post.
 

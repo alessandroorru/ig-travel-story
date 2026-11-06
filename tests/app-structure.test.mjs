@@ -285,6 +285,21 @@ class FakeContainer extends FakeElement {
   }
 }
 
+class FakeCanvas extends FakeElement {
+  activeTouches = [];
+
+  emit(type, event = {}) {
+    if (!type.startsWith('touch')) return super.emit(type, event);
+    const touches = event.touches.map((touch, index) => ({ identifier: index + 1, ...touch }));
+    const previous = this.activeTouches;
+    this.activeTouches = touches;
+    const changedTouches = type === 'touchstart'
+      ? touches.filter(({ identifier }) => !previous.some((touch) => touch.identifier === identifier))
+      : previous.filter(({ identifier }) => !touches.some((touch) => touch.identifier === identifier));
+    return super.emit(type, { changedTouches, ...event, touches });
+  }
+}
+
 function createAppFixture() {
   const drawImageCalls = [];
   const textCalls = [];
@@ -339,7 +354,7 @@ function createAppFixture() {
     ['#recenter', new FakeElement()],
     ['#download', new FakeElement()],
     ['#status', new FakeElement()],
-    ['#story-canvas', new FakeElement()],
+    ['#story-canvas', new FakeCanvas()],
   ]);
   for (const [slot, label] of [['top', 'Foto superiore'], ['bottom', 'Foto inferiore'], ...fourPhotoSlots]) {
     elements.set(`#post-photo-${slot}`, Object.assign(new FakeElement(), { labels: [{ textContent: label }] }));
@@ -1640,6 +1655,140 @@ test('a released extra finger cannot restart a four-photo gesture after switchin
   }, 'post-stack-4');
 });
 
+test('a four-photo contact that started on a gap or outside stays ineligible after moving into a frame', async () => {
+  await withPostInteractionApp(async ({ canvas, point, drawImageCalls, elements }) => {
+    const count = drawImageCalls.length;
+    for (const origin of [point(540, 362), point(272, 720), point(4, 362), point(-20, 362)]) {
+      canvas.emit('touchstart', { touches: [origin] });
+      canvas.emit('touchmove', { touches: [point(180, 362)], preventDefault() {} });
+      canvas.emit('touchstart', { touches: [point(180, 362), point(280, 362)] });
+      canvas.emit('touchmove', {
+        touches: [point(160, 362), point(310, 362)],
+        preventDefault() { assert.fail('both contacts must originate in the same frame'); },
+      });
+      canvas.emit('touchend', { touches: [] });
+    }
+
+    // The first contact belongs to a different DOM target and the canvas never saw its start.
+    const firstCanvasContact = { identifier: 2, ...point(280, 362) };
+    canvas.emit('touchstart', {
+      touches: [point(180, 362), firstCanvasContact],
+      changedTouches: [firstCanvasContact],
+    });
+    canvas.emit('touchmove', {
+      touches: [point(160, 362), point(310, 362)],
+      preventDefault() { assert.fail('a contact from outside the canvas must stay ineligible'); },
+    });
+    assert.equal(drawImageCalls.length, count);
+    assert.equal(elements.get('#post-select-bottom-left').attributes.get('aria-pressed'), 'true');
+  }, 'post-stack-4');
+});
+
+test('the original Story and two-photo pairs resume after a temporary third finger is lifted', async () => {
+  await withPostInteractionApp(async ({ canvas, point, elements, select, upload, finish }) => {
+    for (const template of ['post-stack', 'cinema']) {
+      select(template);
+      if (template === 'cinema') await finish(upload('#photo'));
+      const pair = [point(340, 362), point(540, 362)];
+      canvas.emit('touchstart', { touches: pair });
+      canvas.emit('touchstart', { touches: [...pair, point(640, 362)] });
+      const remaining = [point(340, 382), point(540, 382)];
+      canvas.emit('touchmove', {
+        touches: [...remaining, point(640, 382)],
+        preventDefault() { assert.fail('three contacts must stay native'); },
+      });
+      canvas.emit('touchend', { touches: remaining });
+      let prevented = 0;
+      canvas.emit('touchmove', {
+        touches: [point(340, 382), point(640, 382)],
+        preventDefault() { prevented++; },
+      });
+      assert.equal(prevented, 1, `${template} must resume the original two contacts`);
+      assert.equal(elements.get('#zoom').value, '1.5');
+      canvas.emit('touchend', { touches: [] });
+    }
+  });
+});
+
+test('replacing a contact after switching templates leaves the sequence stale until fully released', async () => {
+  await withPostInteractionApp(async ({ canvas, point, select, drawImageCalls, elements }) => {
+    const pair = [point(180, 362), point(280, 362)];
+    canvas.emit('touchstart', { touches: pair });
+    select('post-stack');
+    select('post-stack-4');
+    canvas.emit('touchend', { touches: pair.slice(0, 1) });
+    const replacement = [pair[0], { identifier: 3, ...point(280, 362) }];
+    canvas.emit('touchstart', { touches: replacement });
+    const count = drawImageCalls.length;
+    canvas.emit('touchmove', {
+      touches: [pair[0], { identifier: 3, ...point(330, 362) }],
+      preventDefault() { assert.fail('a new contact cannot revive a stale sequence'); },
+    });
+    assert.equal(drawImageCalls.length, count);
+    canvas.emit('touchend', { touches: [] });
+
+    canvas.emit('touchstart', { touches: pair });
+    canvas.emit('touchmove', { touches: [pair[0], point(330, 362)], preventDefault() {} });
+    assert.equal(elements.get('#zoom').value, '1.5');
+  }, 'post-stack-4');
+});
+
+test('a canceled pinch leaves later moves native until a fully released pair starts again', async () => {
+  await withPostInteractionApp(async ({ canvas, point, drawImageCalls, elements }) => {
+    const pair = [point(180, 362), point(280, 362)];
+    canvas.emit('touchstart', { touches: pair });
+    canvas.emit('touchcancel', { touches: pair.slice(0, 1) });
+    const count = drawImageCalls.length;
+    canvas.emit('touchmove', {
+      touches: [point(175, 362)],
+      preventDefault() { assert.fail('canceled pinch must leave remaining moves native'); },
+    });
+    canvas.emit('touchstart', { touches: pair });
+    canvas.emit('touchmove', {
+      touches: [pair[0], point(330, 362)],
+      preventDefault() { assert.fail('remaining contact cannot revive a canceled pinch'); },
+    });
+    assert.equal(drawImageCalls.length, count);
+    canvas.emit('touchend', { touches: [] });
+
+    canvas.emit('touchstart', { touches: pair });
+    canvas.emit('touchmove', { touches: [pair[0], point(330, 362)], preventDefault() {} });
+    assert.equal(elements.get('#zoom').value, '1.5');
+  }, 'post-stack-4');
+});
+
+test('canvas keyboard zoom edits the active four-photo slot while the narrow range is hidden', async () => {
+  assert.match(css, /@media\s*\(max-width:\s*60rem\)\s*\{[\s\S]*?\.field--zoom\s+input\[type=["']range["']\]\s*\{[^}]*\bdisplay:\s*none\b/s);
+  await withPostInteractionApp(async ({ canvas, elements, images, drawing }) => {
+    const zoom = elements.get('#zoom');
+    const before = images.map(drawing);
+    elements.get('#post-select-bottom-right').emit('click', { detail: 0 });
+    let prevented = 0;
+    const key = (key, modifiers = {}) => canvas.emit('keydown', { key, preventDefault() { prevented++; }, ...modifiers });
+    key('+');
+    assert.equal(zoom.value, '1.1');
+    assert.equal(elements.get('#zoom-value').value, '1,10×');
+    assert.notDeepEqual(drawing(images[2]), before[2]);
+    assert.deepEqual([0, 1, 3].map((index) => drawing(images[index])), [0, 1, 3].map((index) => before[index]));
+    key('=');
+    assert.equal(zoom.value, '1.2');
+    key('-');
+    key('_');
+    key('-');
+    assert.equal(zoom.value, '1');
+    assert.deepEqual(images.map(drawing), before);
+    zoom.value = '2.97';
+    zoom.emit('input');
+    key('+');
+    assert.equal(zoom.value, '3');
+    key('-', { ctrlKey: true });
+    key('-', { metaKey: true });
+    assert.equal(zoom.value, '3');
+    assert.equal(prevented, 6);
+    assert.match(elements.get('#canvas-instructions').textContent, /\+ e - per lo zoom/);
+  }, 'post-stack-4');
+});
+
 test('selects and drags only the Post frame where pointerdown begins', async () => {
   await withPostInteractionApp(async ({ canvas, elements, top, bottom, pointer, drawing, drawImageCalls }) => {
     pointer('pointerdown', 540, 362);
@@ -1718,11 +1867,13 @@ test('anchors a same-frame Post pinch and ignores cross-frame or gap touches', a
     assert.deepEqual(drawing(top), [-158, -416, 1596, 1596], 'pinch anchors relative to the top frame center');
     assert.deepEqual(drawing(bottom), [8, 546, 1064, 1064]);
     assert.match(elements.get('#canvas-instructions').textContent, /superiore/i);
+    canvas.emit('touchend', { touches: [] });
 
     const count = drawImageCalls.length;
     for (const invalid of [pair(340, 362, 540, 1078), pair(340, 362, 540, 720), pair(4, 362, 540, 362)]) {
       canvas.emit('touchstart', { touches: invalid });
       canvas.emit('touchmove', { touches: invalid, preventDefault() { assert.fail('invalid Post gestures remain native'); } });
+      canvas.emit('touchend', { touches: [] });
     }
     assert.equal(drawImageCalls.length, count);
 

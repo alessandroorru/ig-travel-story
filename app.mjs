@@ -81,6 +81,8 @@ const mediaInputs = [photoInput, zoomInput, ...postPhotoInputs];
 
 let activePointer = null;
 let activeTouchGesture = null;
+const touchOrigins = new Map();
+let touchSequenceBlocked = false;
 const DAY_RANGE_ERROR = 'Il giorno deve essere un intero tra 1 e 999 e non può superare i giorni totali.';
 
 function createMediaState() {
@@ -149,7 +151,7 @@ function syncActiveMediaPresentation() {
   const post = getActivePost();
   const activeLabel = post ? postControls[state.template].slots[post.activeSlot].input.labels[0].textContent : '';
   const selectionHelp = post ? `${activeLabel} attiva.\nTocca o clicca un riquadro per selezionarlo. ` : '';
-  const instructions = `${selectionHelp}Trascina la foto o usa i tasti freccia. Tieni premuto Maiusc per spostarla più velocemente. ${colorContextDescription}`;
+  const instructions = `${selectionHelp}Trascina la foto o usa i tasti freccia. Tieni premuto Maiusc per spostarla più velocemente. Seleziona l’anteprima con Tab e usa + e - per lo zoom. ${colorContextDescription}`;
   if (canvasInstructions.textContent !== instructions) canvasInstructions.textContent = instructions;
   postSelectionGuide.hidden = !post;
   if (post) {
@@ -377,11 +379,18 @@ function clampOffsets(media, frame) {
   media.offsetY = placement.offsetY;
 }
 
+function setZoom(zoom, { media, frame }) {
+  media.zoom = zoom;
+  syncZoomControl(media);
+  clampOffsets(media, frame);
+  redraw();
+}
+
 function updateTextState() {
   const template = selectedTemplate();
   if (template !== state.template) {
     if (activePointer) finishPointer({ pointerId: activePointer.id });
-    activeTouchGesture = null;
+    resetTouchSequence(true);
   }
   state.template = template;
   state.day = readInteger(dayInput);
@@ -462,41 +471,82 @@ function canvasPointFromClient(clientX, clientY) {
   };
 }
 
-function getTouchPoints(touches) {
-  const points = Array.from(touches, ({ clientX, clientY }) => canvasPointFromClient(clientX, clientY));
-  return points.every(Boolean) ? points : null;
+function resetTouchSequence(blocked = false) {
+  activeTouchGesture = null;
+  touchOrigins.clear();
+  touchSequenceBlocked = blocked;
+}
+
+function getTouchGestureGeometry({ contactIds, frame, slot }, touches) {
+  if (touches.length !== 2) return null;
+  const points = [];
+  for (const touch of Array.from(touches)) {
+    if (!contactIds.includes(touch.identifier)) return null;
+    const point = canvasPointFromClient(touch.clientX, touch.clientY);
+    if (!point || (slot && postSlotAtPoint(state.template, point.x, point.y) !== slot)) return null;
+    points.push(point);
+  }
+  return calculateTouchGeometry(points, frame);
 }
 
 function startTouchGesture(touches) {
-  activeTouchGesture = null;
   if (touches.length !== 2) return;
-  const points = getTouchPoints(touches);
-  if (!points) return;
-
-  let slot;
-  if (getActivePost()) {
-    slot = postSlotAtPoint(state.template, points[0].x, points[0].y);
-    if (!slot || slot !== postSlotAtPoint(state.template, points[1].x, points[1].y)) return;
-    selectPostSlot(slot);
-  }
+  const contactIds = Array.from(touches, ({ identifier }) => identifier);
+  const slot = touchOrigins.get(contactIds[0]);
+  if (slot === undefined || slot !== touchOrigins.get(contactIds[1])) return;
   const target = getMediaTarget(slot);
-  if (!target.media.image) return;
-  activeTouchGesture = { ...target, slot, geometry: calculateTouchGeometry(points, target.frame) };
+  const gesture = { ...target, slot, contactIds };
+  const geometry = getTouchGestureGeometry(gesture, touches);
+  if (!geometry) return;
+  if (slot) selectPostSlot(slot);
+  if (target.media.image) activeTouchGesture = { ...gesture, geometry };
+}
+
+function handleTouchStart({ touches, changedTouches }) {
+  // All current contacts are new if the previous sequence was fully released.
+  if (touches.length === changedTouches.length) resetTouchSequence();
+  if (touchSequenceBlocked) return;
+
+  const post = getActivePost();
+  for (const touch of Array.from(changedTouches)) {
+    const point = canvasPointFromClient(touch.clientX, touch.clientY);
+    if (!point || point.x < 0 || point.x >= canvas.width || point.y < 0 || point.y >= canvas.height) continue;
+    const slot = post ? postSlotAtPoint(state.template, point.x, point.y) : null;
+    if (!post || slot) touchOrigins.set(touch.identifier, slot);
+  }
+  if (touches.length === 1) {
+    const slot = touchOrigins.get(touches[0].identifier);
+    if (slot) selectPostSlot(slot);
+  }
+
+  if (activeTouchGesture) activeTouchGesture.geometry = null;
+  else startTouchGesture(touches);
+}
+
+function handleTouchEnd({ touches, changedTouches }) {
+  if (touches.length === 0) {
+    resetTouchSequence();
+    return;
+  }
+  for (const { identifier } of Array.from(changedTouches)) touchOrigins.delete(identifier);
+  if (!activeTouchGesture) return;
+
+  if (!activeTouchGesture.contactIds.every((id) => touchOrigins.has(id))) {
+    activeTouchGesture = null;
+    return;
+  }
+  // A temporary third finger pauses the pinch. Rebase the original pair when it returns.
+  activeTouchGesture.geometry = getTouchGestureGeometry(activeTouchGesture, touches);
 }
 
 function applyTouchGesture(touches) {
   const gesture = activeTouchGesture;
   if (!gesture) return false;
-  const { media, frame, slot } = gesture;
-  const points = getTouchPoints(touches);
-  if (!points || (slot && points.some(({ x, y }) => postSlotAtPoint(state.template, x, y) !== slot))) {
-    // Retain the original target, and rebase if the fingers return to it.
-    gesture.geometry = null;
-    return false;
-  }
+  const { media, frame } = gesture;
   const previous = gesture.geometry;
-  const current = calculateTouchGeometry(points, frame);
+  const current = getTouchGestureGeometry(gesture, touches);
   gesture.geometry = current;
+  if (!current) return false;
   if (!previous) return true;
 
   const nextState = calculatePinchTransform({
@@ -513,10 +563,6 @@ function applyTouchGesture(touches) {
   syncZoomControl();
   redraw();
   return true;
-}
-
-function finishTouchGesture() {
-  activeTouchGesture = null;
 }
 
 function finishPointer(event) {
@@ -554,11 +600,7 @@ for (const templateInput of templateInputs) {
 }
 
 zoomInput.addEventListener('input', () => {
-  const { media, frame } = getMediaTarget();
-  media.zoom = Number.parseFloat(zoomInput.value);
-  syncZoomControl(media);
-  clampOffsets(media, frame);
-  redraw();
+  setZoom(Number.parseFloat(zoomInput.value), getMediaTarget());
 });
 
 recenterButton.addEventListener('click', () => {
@@ -603,26 +645,20 @@ canvas.addEventListener('pointerup', finishPointer);
 canvas.addEventListener('pointercancel', finishPointer);
 canvas.addEventListener('lostpointercapture', finishPointer);
 
-canvas.addEventListener('touchstart', (event) => {
-  if (getActivePost() && event.touches.length === 1) {
-    const touch = event.touches[0];
-    const point = canvasPointFromClient(touch.clientX, touch.clientY);
-    if (point) selectPostSlot(postSlotAtPoint(state.template, point.x, point.y));
-  }
-  startTouchGesture(event.touches);
-});
+canvas.addEventListener('touchstart', handleTouchStart);
 
 canvas.addEventListener('touchmove', (event) => {
-  if (event.touches.length !== 2 || event.cancelable === false) {
-    activeTouchGesture = null;
+  if (event.touches.length !== 2) return;
+  if (event.cancelable === false) {
+    resetTouchSequence(true);
     return;
   }
 
   if (applyTouchGesture(event.touches)) event.preventDefault();
 }, { passive: false });
 
-canvas.addEventListener('touchend', finishTouchGesture);
-canvas.addEventListener('touchcancel', finishTouchGesture);
+canvas.addEventListener('touchend', handleTouchEnd);
+canvas.addEventListener('touchcancel', (event) => resetTouchSequence(event.touches.length > 0));
 
 canvas.addEventListener('keydown', (event) => {
   const step = event.shiftKey ? 48 : 12;
@@ -633,9 +669,18 @@ canvas.addEventListener('keydown', (event) => {
     ArrowDown: [0, step],
   };
   const movement = movements[event.key];
-  if (!movement) return;
+  const zoomStep = { '+': 0.1, '=': 0.1, '-': -0.1, '_': -0.1 }[event.key];
+  if (!movement && !zoomStep) return;
   const target = getMediaTarget();
   if (!target.media.image) return;
+
+  if (zoomStep) {
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    const zoom = Math.round((target.media.zoom + zoomStep) * 100) / 100;
+    event.preventDefault();
+    setZoom(Math.min(3, Math.max(1, zoom)), target);
+    return;
+  }
 
   event.preventDefault();
   moveImage(...movement, target);
