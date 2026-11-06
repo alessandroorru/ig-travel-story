@@ -657,6 +657,7 @@ test('falls back to a cleaned-up download when sharing fails', async () => {
   const revokedUrls = [];
   const anchors = [];
   let shareCalls = 0;
+  let blobEncodes = 0;
   const restoreNavigator = replaceGlobal('navigator', {
     canShare: () => true,
     async share() {
@@ -667,7 +668,10 @@ test('falls back to a cleaned-up download when sharing fails', async () => {
   const restoreFile = replaceGlobal('File', FakeShareFile);
 
   fixture.elements.get('#story-canvas').toDataURL = () => 'data:image/png;base64,cG5n';
-  fixture.elements.get('#story-canvas').toBlob = (callback) => callback(new Blob(['png'], { type: 'image/png' }));
+  fixture.elements.get('#story-canvas').toBlob = (callback) => {
+    blobEncodes += 1;
+    callback(new Blob(['png'], { type: 'image/png' }));
+  };
   globalThis.document = {
     querySelector: (selector) => fixture.elements.get(selector),
     createElement: () => {
@@ -693,6 +697,16 @@ test('falls back to a cleaned-up download when sharing fails', async () => {
     assert.equal(anchors[0].clicked, true);
     assert.deepEqual(revokedUrls, ['blob:fallback']);
     assert.match(fixture.elements.get('#status').textContent, /PNG scaricato/i);
+    assert.equal(blobEncodes, 0, 'a share rejection can reuse the captured file');
+
+    fixture.elements.get('#story-canvas').toDataURL = () => 'data:,';
+    await Promise.all(fixture.elements.get('#download').emit('click'));
+
+    assert.equal(shareCalls, 1, 'capture failure skips sharing');
+    assert.equal(blobEncodes, 1, 'capture failure can encode the canvas through toBlob');
+    assert.equal(anchors[1].download, 'travel-story-day-01.png');
+    assert.equal(anchors[1].clicked, true);
+    assert.deepEqual(revokedUrls, ['blob:fallback', 'blob:fallback']);
   } finally {
     globalThis.document = originalDocument;
     globalThis.Image = originalImage;
@@ -1246,6 +1260,7 @@ async function withAsyncApp(run, { preferred = 'supported', attributes = { color
   const shares = [];
   const renders = [];
   const exports = [];
+  const downloadBlobs = [];
   let nextUrl = 0;
   const drawImage = fixture.context.drawImage;
   fixture.context.drawImage = (...args) => {
@@ -1278,9 +1293,21 @@ async function withAsyncApp(run, { preferred = 'supported', attributes = { color
       body: { append() {} },
     }),
     replaceGlobal('Image', fixture.FakeImage),
-    replaceGlobal('URL', { createObjectURL: () => `blob:async-${++nextUrl}`, revokeObjectURL: (url) => revoked.push(url) }),
+    replaceGlobal('URL', {
+      createObjectURL(value) {
+        if (value instanceof Blob) downloadBlobs.push(value);
+        return `blob:async-${++nextUrl}`;
+      },
+      revokeObjectURL: (url) => revoked.push(url),
+    }),
     replaceGlobal('matchMedia', undefined),
-    replaceGlobal('navigator', share ? { canShare: () => true, share: (payload) => { shares.push(payload); return Promise.resolve(); } } : {}),
+    replaceGlobal('navigator', share ? {
+      canShare: () => true,
+      share(payload) {
+        shares.push(payload);
+        return typeof share === 'function' ? share() : Promise.resolve();
+      },
+    } : {}),
     replaceGlobal('File', FakeShareFile),
   ];
   function select(template) {
@@ -1300,7 +1327,7 @@ async function withAsyncApp(run, { preferred = 'supported', attributes = { color
   }
   try {
     await import(`${appUrl.href}?async-fixture=${++asyncFixtureId}`);
-    await run({ ...fixture, canvas, revoked, contexts, anchors, shares, renders, exports, select, upload, finish });
+    await run({ ...fixture, canvas, revoked, contexts, anchors, shares, renders, exports, downloadBlobs, select, upload, finish });
   } finally {
     for (const restore of restores.reverse()) restore();
   }
@@ -1875,4 +1902,61 @@ test('blocks four-photo export until all four slots are valid and exports the vi
       }
     }, { share });
   }
+});
+
+test('rejects a decoded four-photo upload with a zero intrinsic dimension', async () => {
+  await withAsyncApp(async ({ select, upload, finish, elements, revoked, drawImageCalls }) => {
+    select('post-stack-4');
+    const siblings = [];
+    for (const [slot] of fourPhotoSlots.slice(0, 3)) {
+      const image = upload(`#post-photo-${slot}`);
+      await finish(image);
+      siblings.push(image);
+    }
+    const zeroWidth = upload('#post-photo-bottom-left');
+    zeroWidth.naturalWidth = 0;
+    await finish(zeroWidth);
+    assert.equal(elements.get('#download').disabled, true, 'an empty fourth image cannot enable export');
+    assert.match(elements.get('#status').textContent, /Impossibile leggere/);
+    assert.deepEqual(drawImageCalls.slice(-3).map(([image]) => image), siblings);
+    assert.deepEqual(revoked, [zeroWidth.src]);
+
+    const fourth = upload('#post-photo-bottom-left');
+    await finish(fourth);
+    const zoom = elements.get('#zoom');
+    zoom.value = '2';
+    zoom.emit('input');
+    const validDrawings = drawImageCalls.slice(-4);
+    assert.equal(validDrawings.at(-1)[0], fourth);
+
+    const zeroHeight = upload('#post-photo-bottom-left');
+    zeroHeight.naturalHeight = 0;
+    await finish(zeroHeight);
+    select('post-stack-4');
+    assert.equal(elements.get('#download').disabled, false);
+    assert.equal(zoom.value, '2', 'a rejected replacement preserves the prior crop');
+    assert.deepEqual(drawImageCalls.slice(-4), validDrawings);
+    assert.deepEqual(revoked, [zeroWidth.src, zeroHeight.src]);
+  });
+});
+
+test('downloads the captured four-photo PNG when sharing fails after a template switch', async () => {
+  const sharing = Promise.withResolvers();
+  await withAsyncApp(async ({ canvas, select, upload, finish, elements, anchors, shares, exports, downloadBlobs, revoked }) => {
+    select('post-stack-4');
+    for (const [slot] of fourPhotoSlots) await finish(upload(`#post-photo-${slot}`));
+    const pendingExport = Promise.all(elements.get('#download').emit('click'));
+    assert.equal(shares.length, 1, 'share starts synchronously before switching templates');
+
+    select('cinema');
+    assert.equal(canvas.height, 1920);
+    sharing.reject(new Error('share unavailable'));
+    await pendingExport;
+
+    assert.deepEqual(exports, [[1080, 1440, 'image/png']]);
+    assert.equal(downloadBlobs.length, 1);
+    assert.equal(downloadBlobs[0], shares[0].files[0], 'fallback uses the original share file');
+    assert.equal(anchors[0].download, 'instagram-post-stack-4.png');
+    assert.deepEqual(revoked, [anchors[0].href]);
+  }, { share: () => sharing.promise });
 });

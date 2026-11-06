@@ -310,21 +310,22 @@ async function exportStory() {
   if (downloadButton.disabled) return;
 
   const filename = filenameForTemplate(state.template);
+  let file;
 
   if (canSharePngFile) {
     try {
-      const file = createPngShareFile(filename);
+      file = createPngShareFile(filename);
       const shareRequest = navigator.share({ files: [file] });
       await shareRequest;
       setStatus(`PNG condiviso: ${filename}`);
       return;
     } catch (error) {
-      if (error?.name === 'AbortError') return;
+      if (file && error?.name === 'AbortError') return;
     }
   }
 
   try {
-    const blob = await createPngBlob();
+    const blob = file ?? await createPngBlob();
     downloadPng(blob, filename);
     setStatus(`PNG scaricato: ${filename}`);
   } catch {
@@ -407,9 +408,21 @@ function loadPhoto(file, templateId, slot) {
   const nextUrl = URL.createObjectURL(file);
   const nextImage = new Image();
 
+  function rejectImage() {
+    URL.revokeObjectURL(nextUrl);
+    if (request === mediaState.imageRequest && canUpdatePresentation()) {
+      setStatus('Impossibile leggere questa immagine. L’anteprima precedente non è stata modificata.');
+    }
+  }
+
   nextImage.addEventListener('load', () => {
     if (request !== mediaState.imageRequest) {
       URL.revokeObjectURL(nextUrl);
+      return;
+    }
+
+    if (!(nextImage.naturalWidth > 0 && nextImage.naturalHeight > 0)) {
+      rejectImage();
       return;
     }
 
@@ -428,12 +441,7 @@ function loadPhoto(file, templateId, slot) {
     if (previousUrl) URL.revokeObjectURL(previousUrl);
   }, { once: true });
 
-  nextImage.addEventListener('error', () => {
-    URL.revokeObjectURL(nextUrl);
-    if (request === mediaState.imageRequest && canUpdatePresentation()) {
-      setStatus('Impossibile leggere questa immagine. L’anteprima precedente non è stata modificata.');
-    }
-  }, { once: true });
+  nextImage.addEventListener('error', rejectImage, { once: true });
 
   nextImage.src = nextUrl;
 }
