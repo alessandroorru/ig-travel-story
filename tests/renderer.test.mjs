@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import * as renderer from '../story-renderer.mjs';
+import { POST_STACK_4_LAYOUT } from '../post-stack-geometry.mjs';
 
 const {
   CANVAS_HEIGHT,
@@ -205,6 +206,101 @@ test('restores the Post clip and caller canvas state when drawing throws', () =>
   assert.deepEqual(context.calls.slice(-2), [['restore'], ['restore']]);
   assert.equal(context.fillStyle, '#123456');
   assert.equal(context.shadowBlur, 14);
+});
+
+test('renders four independent crops in clockwise clips over a white background', () => {
+  const context = createRecordingContext();
+  const topLeft = { width: 528, height: 708 };
+  const topRight = { width: 1056, height: 708 };
+  const bottomRight = { width: 528, height: 1416 };
+  const bottomLeft = { width: 264, height: 354 };
+
+  renderPostStack(context, {
+    topLeft: { image: topLeft, zoom: 2, offsetX: 50, offsetY: -40 },
+    topRight: { image: topRight, zoom: 1, offsetX: -60, offsetY: 30 },
+    bottomRight: { image: bottomRight, zoom: 1, offsetX: 80, offsetY: 120 },
+    bottomLeft: { image: bottomLeft, zoom: 1.5, offsetX: -999, offsetY: 999 },
+  }, POST_STACK_4_LAYOUT);
+
+  assert.deepEqual(context.paintedRects, [
+    { args: [0, 0, 1080, 1440], color: '#ffffff', shadowBlur: 0 },
+  ]);
+  assert.deepEqual(context.calls, [
+    ['save'], ['clearRect', 0, 0, 1080, 1440], ['fillRect', 0, 0, 1080, 1440],
+    ['save'], ['beginPath'], ['rect', 8, 8, 528, 708], ['clip'],
+    ['drawImage', topLeft, -206, -386, 1056, 1416], ['restore'],
+    ['save'], ['beginPath'], ['rect', 544, 8, 528, 708], ['clip'],
+    ['drawImage', topRight, 220, 8, 1056, 708], ['restore'],
+    ['save'], ['beginPath'], ['rect', 544, 724, 528, 708], ['clip'],
+    ['drawImage', bottomRight, 544, 490, 528, 1416], ['restore'],
+    ['save'], ['beginPath'], ['rect', 8, 724, 528, 708], ['clip'],
+    ['drawImage', bottomLeft, -256, 724, 792, 1062], ['restore'],
+    ['restore'],
+  ]);
+});
+
+test('routes the four-photo template through the Post renderer', () => {
+  const context = createRecordingContext();
+  const image = { width: 528, height: 708 };
+
+  renderStory(context, {
+    template: 'post-stack-4',
+    postSlots: { topRight: { image } },
+    image: { width: 1080, height: 1920 },
+    title: 'Cinema title',
+  });
+
+  assert.deepEqual(context.calls, [
+    ['save'], ['clearRect', 0, 0, 1080, 1440], ['fillRect', 0, 0, 1080, 1440],
+    ['save'], ['beginPath'], ['rect', 544, 8, 528, 708], ['clip'],
+    ['drawImage', image, 544, 8, 528, 708], ['restore'], ['restore'],
+  ]);
+});
+
+test('draws a four-photo sibling while skipping empty slots and invalid image dimensions', () => {
+  const context = createRecordingContext();
+  const image = { width: 528, height: 708 };
+  renderPostStack(context, {
+    topLeft: null,
+    topRight: { image: { width: 0, height: 708 } },
+    bottomRight: { image: { width: 528, height: Infinity } },
+    bottomLeft: { image },
+  }, POST_STACK_4_LAYOUT);
+
+  assert.deepEqual(context.calls.filter(([name]) => name === 'rect'), [
+    ['rect', 8, 724, 528, 708],
+  ]);
+  assert.deepEqual(context.calls.filter(([name]) => name === 'drawImage'), [
+    ['drawImage', image, 8, 724, 528, 708],
+  ]);
+});
+
+test('restores the four-photo clip and caller canvas state when any draw throws', () => {
+  const slots = {
+    topLeft: { image: { width: 528, height: 708 } },
+    topRight: { image: { width: 528, height: 708 } },
+    bottomRight: { image: { width: 528, height: 708 } },
+    bottomLeft: { image: { width: 528, height: 708 } },
+  };
+  const drawingError = new Error('Cannot draw image');
+  for (const { image } of Object.values(slots)) {
+    const context = createRecordingContext();
+    context.fillStyle = '#123456';
+    context.shadowBlur = 14;
+    const drawImage = context.drawImage;
+    context.drawImage = (source, ...args) => {
+      if (source === image) throw drawingError;
+      drawImage(source, ...args);
+    };
+
+    assert.throws(
+      () => renderPostStack(context, slots, POST_STACK_4_LAYOUT),
+      (error) => error === drawingError,
+    );
+    assert.deepEqual(context.calls.slice(-2), [['restore'], ['restore']]);
+    assert.equal(context.fillStyle, '#123456');
+    assert.equal(context.shadowBlur, 14);
+  }
 });
 
 test('honors explicit newlines while wrapping at whitespace', () => {

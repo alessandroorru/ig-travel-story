@@ -1,4 +1,5 @@
-import { POST_STACK_LAYOUT } from './post-stack-geometry.mjs';
+import { getPostLayout, POST_STACK_LAYOUT } from './post-stack-geometry.mjs';
+import { getTemplateDefinition } from './template-definitions.mjs';
 
 export const CANVAS_WIDTH = 1080;
 export const CANVAS_HEIGHT = 1920;
@@ -189,15 +190,15 @@ function renderPostcard(context, centerText) {
   }
 }
 
-export function renderPostStack(context, postSlots) {
+export function renderPostStack(context, postSlots, layout = POST_STACK_LAYOUT) {
   context.save();
   try {
     resetCanvasTextState(context);
-    context.clearRect(0, 0, POST_STACK_LAYOUT.width, POST_STACK_LAYOUT.height);
+    context.clearRect(0, 0, layout.width, layout.height);
     context.fillStyle = '#ffffff';
-    context.fillRect(0, 0, POST_STACK_LAYOUT.width, POST_STACK_LAYOUT.height);
+    context.fillRect(0, 0, layout.width, layout.height);
 
-    for (const [name, frame] of Object.entries(POST_STACK_LAYOUT.frames)) {
+    for (const [name, frame] of Object.entries(layout.frames)) {
       const slot = postSlots?.[name];
       const image = slot?.image;
       const imageWidth = imageDimension(image, 'naturalWidth', 'width');
@@ -227,8 +228,9 @@ export function renderPostStack(context, postSlots) {
 }
 
 export function renderStory(context, state) {
-  if (state?.template === 'post-stack') {
-    renderPostStack(context, state?.postSlots);
+  const template = state?.template;
+  if (getTemplateDefinition(template).format === 'post') {
+    renderPostStack(context, state?.postSlots, getPostLayout(template));
     return;
   }
 
@@ -249,7 +251,7 @@ export function renderStory(context, state) {
     context.drawImage(image, placement.x, placement.y, placement.width, placement.height);
   }
 
-  if (state?.template === 'postcard') {
+  if (template === 'postcard') {
     renderPostcard(context, state?.centerText);
     resetCanvasTextState(context);
     return;
