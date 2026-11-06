@@ -116,9 +116,13 @@ function getActivePost() {
   return state.postMedia[state.template];
 }
 
-function getActiveMediaState() {
+function getMediaTarget(slot) {
   const post = getActivePost();
-  return post ? post.slots[post.activeSlot] : state;
+  if (!post) {
+    return { media: state, frame: { x: 0, y: 0, width: canvas.width, height: canvas.height } };
+  }
+  const targetSlot = slot ?? post.activeSlot;
+  return { media: post.slots[targetSlot], frame: getPostLayout(state.template).frames[targetSlot] };
 }
 
 function synchronizeResponsiveOrder(isMobile) {
@@ -136,8 +140,7 @@ function setStatus(message) {
   status.textContent = message;
 }
 
-function syncZoomControl() {
-  const media = getActiveMediaState();
+function syncZoomControl(media = getMediaTarget().media) {
   zoomInput.value = String(media.zoom);
   zoomValue.value = `${media.zoom.toFixed(2).replace('.', ',')}×`;
 }
@@ -167,7 +170,7 @@ function selectPostSlot(slot) {
   const post = getActivePost();
   if (!post?.slots[slot]) return;
   post.activeSlot = slot;
-  syncZoomControl();
+  syncZoomControl(post.slots[slot]);
   syncActiveMediaPresentation();
 }
 
@@ -364,11 +367,8 @@ function redraw() {
   renderStory(context, post ? { template: state.template, postSlots: post.slots } : state);
 }
 
-function clampOffsets(media = getActiveMediaState(), slot = getActivePost()?.activeSlot) {
+function clampOffsets(media, frame) {
   if (!media.image) return;
-  const frame = slot
-    ? getPostLayout(state.template).frames[slot]
-    : { width: canvas.width, height: canvas.height };
   const placement = computeImagePlacement(
     media.image.naturalWidth, media.image.naturalHeight,
     media.zoom, media.offsetX, media.offsetY, frame.width, frame.height,
@@ -446,11 +446,10 @@ function loadPhoto(file, templateId, slot) {
   nextImage.src = nextUrl;
 }
 
-function moveImage(deltaX, deltaY, media = getActiveMediaState(), slot = getActivePost()?.activeSlot) {
-  if (!media.image) return;
+function moveImage(deltaX, deltaY, { media, frame }) {
   media.offsetX += deltaX;
   media.offsetY += deltaY;
-  clampOffsets(media, slot);
+  clampOffsets(media, frame);
   redraw();
 }
 
@@ -463,67 +462,71 @@ function canvasPointFromClient(clientX, clientY) {
   };
 }
 
-function getTouchGesture(touches) {
-  if (touches.length !== 2) return null;
-  const points = touches.map((touch) => canvasPointFromClient(touch.clientX, touch.clientY));
-  if (points.some((point) => !point)) return null;
-
-  let slot = null;
-  let frame = { x: 0, y: 0, width: canvas.width, height: canvas.height };
-  if (getActivePost()) {
-    slot = postSlotAtPoint(state.template, points[0].x, points[0].y);
-    if (!slot || slot !== postSlotAtPoint(state.template, points[1].x, points[1].y)) return null;
-    frame = getPostLayout(state.template).frames[slot];
-  }
-  return { slot, ...calculateTouchGeometry(points, frame) };
+function getTouchPoints(touches) {
+  const points = Array.from(touches, ({ clientX, clientY }) => canvasPointFromClient(clientX, clientY));
+  return points.every(Boolean) ? points : null;
 }
 
-function resetTouchGesture(touches) {
-  const gesture = getTouchGesture(Array.from(touches));
-  if (gesture?.slot) selectPostSlot(gesture.slot);
-  const media = gesture?.slot ? getActivePost().slots[gesture.slot] : state;
-  activeTouchGesture = media.image ? gesture : null;
+function startTouchGesture(touches) {
+  activeTouchGesture = null;
+  if (touches.length !== 2) return;
+  const points = getTouchPoints(touches);
+  if (!points) return;
+
+  let slot;
+  if (getActivePost()) {
+    slot = postSlotAtPoint(state.template, points[0].x, points[0].y);
+    if (!slot || slot !== postSlotAtPoint(state.template, points[1].x, points[1].y)) return;
+    selectPostSlot(slot);
+  }
+  const target = getMediaTarget(slot);
+  if (!target.media.image) return;
+  activeTouchGesture = { ...target, slot, geometry: calculateTouchGeometry(points, target.frame) };
 }
 
 function applyTouchGesture(touches) {
-  if (!activeTouchGesture) return false;
-  const currentGesture = getTouchGesture(Array.from(touches));
-  if (!currentGesture || currentGesture.slot !== activeTouchGesture.slot) {
+  const gesture = activeTouchGesture;
+  if (!gesture) return false;
+  const { media, frame, slot } = gesture;
+  const points = getTouchPoints(touches);
+  if (!points || (slot && points.some(({ x, y }) => postSlotAtPoint(state.template, x, y) !== slot))) {
     // Retain the original target, and rebase if the fingers return to it.
-    activeTouchGesture.centroid = null;
+    gesture.geometry = null;
     return false;
   }
-  if (!activeTouchGesture.centroid) {
-    activeTouchGesture = currentGesture;
-    return true;
-  }
+  const previous = gesture.geometry;
+  const current = calculateTouchGeometry(points, frame);
+  gesture.geometry = current;
+  if (!previous) return true;
 
-  const media = currentGesture.slot ? getActivePost().slots[currentGesture.slot] : state;
   const nextState = calculatePinchTransform({
     zoom: media.zoom,
     offsetX: media.offsetX,
     offsetY: media.offsetY,
-    previousCentroid: activeTouchGesture.centroid,
-    currentCentroid: currentGesture.centroid,
-    previousDistance: activeTouchGesture.distance,
-    currentDistance: currentGesture.distance,
+    previousCentroid: previous.centroid,
+    currentCentroid: current.centroid,
+    previousDistance: previous.distance,
+    currentDistance: current.distance,
   });
   Object.assign(media, nextState);
-  clampOffsets(media, currentGesture.slot);
+  clampOffsets(media, frame);
   syncZoomControl();
   redraw();
-  activeTouchGesture = currentGesture;
   return true;
+}
+
+function finishTouchGesture() {
+  activeTouchGesture = null;
 }
 
 function finishPointer(event) {
   if (event.pointerType === 'touch') return;
   if (!activePointer || event.pointerId !== activePointer.id) return;
 
+  activePointer = null;
   if (canvas.hasPointerCapture(event.pointerId)) {
     canvas.releasePointerCapture(event.pointerId);
   }
-  activePointer = null;
 }
 
 photoInput.addEventListener('change', () => {
@@ -551,18 +554,19 @@ for (const templateInput of templateInputs) {
 }
 
 zoomInput.addEventListener('input', () => {
-  getActiveMediaState().zoom = Number.parseFloat(zoomInput.value);
-  syncZoomControl();
-  clampOffsets();
+  const { media, frame } = getMediaTarget();
+  media.zoom = Number.parseFloat(zoomInput.value);
+  syncZoomControl(media);
+  clampOffsets(media, frame);
   redraw();
 });
 
 recenterButton.addEventListener('click', () => {
-  const media = getActiveMediaState();
+  const { media } = getMediaTarget();
   media.zoom = 1;
   media.offsetX = 0;
   media.offsetY = 0;
-  syncZoomControl();
+  syncZoomControl(media);
   redraw();
   updateAvailability(media.image ? 'Fotografia ricentrata.' : 'Carica una fotografia per iniziare.');
 });
@@ -577,9 +581,9 @@ canvas.addEventListener('pointerdown', (event) => {
   const slot = post ? postSlotAtPoint(state.template, point.x, point.y) : null;
   if (post && !slot) return;
   if (slot) selectPostSlot(slot);
-  const media = getActiveMediaState();
-  if (!media.image) return;
-  activePointer = { id: event.pointerId, point, media, slot };
+  const target = getMediaTarget(slot);
+  if (!target.media.image) return;
+  activePointer = { ...target, id: event.pointerId, point };
   canvas.setPointerCapture(event.pointerId);
   canvas.focus();
 });
@@ -592,11 +596,12 @@ canvas.addEventListener('pointermove', (event) => {
   const deltaX = point.x - activePointer.point.x;
   const deltaY = point.y - activePointer.point.y;
   activePointer.point = point;
-  moveImage(deltaX, deltaY, activePointer.media, activePointer.slot);
+  moveImage(deltaX, deltaY, activePointer);
 });
 
 canvas.addEventListener('pointerup', finishPointer);
 canvas.addEventListener('pointercancel', finishPointer);
+canvas.addEventListener('lostpointercapture', finishPointer);
 
 canvas.addEventListener('touchstart', (event) => {
   if (getActivePost() && event.touches.length === 1) {
@@ -604,7 +609,7 @@ canvas.addEventListener('touchstart', (event) => {
     const point = canvasPointFromClient(touch.clientX, touch.clientY);
     if (point) selectPostSlot(postSlotAtPoint(state.template, point.x, point.y));
   }
-  resetTouchGesture(event.touches);
+  startTouchGesture(event.touches);
 });
 
 canvas.addEventListener('touchmove', (event) => {
@@ -616,13 +621,8 @@ canvas.addEventListener('touchmove', (event) => {
   if (applyTouchGesture(event.touches)) event.preventDefault();
 }, { passive: false });
 
-canvas.addEventListener('touchend', (event) => {
-  resetTouchGesture(event.touches);
-});
-
-canvas.addEventListener('touchcancel', (event) => {
-  resetTouchGesture(event.touches);
-});
+canvas.addEventListener('touchend', finishTouchGesture);
+canvas.addEventListener('touchcancel', finishTouchGesture);
 
 canvas.addEventListener('keydown', (event) => {
   const step = event.shiftKey ? 48 : 12;
@@ -633,10 +633,12 @@ canvas.addEventListener('keydown', (event) => {
     ArrowDown: [0, step],
   };
   const movement = movements[event.key];
-  if (!movement || !getActiveMediaState().image) return;
+  if (!movement) return;
+  const target = getMediaTarget();
+  if (!target.media.image) return;
 
   event.preventDefault();
-  moveImage(...movement);
+  moveImage(...movement, target);
 });
 
 updateAvailability();

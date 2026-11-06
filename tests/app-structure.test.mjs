@@ -1488,12 +1488,12 @@ test('falls back to an sRGB context without disabling preview or export', async 
 });
 
 
-async function withPostInteractionApp(run) {
+async function withPostInteractionApp(run, template = 'post-stack') {
   await withAsyncApp(async (fixture) => {
-    fixture.select('post-stack');
-    const top = fixture.upload('#post-photo-top');
-    const bottom = fixture.upload('#post-photo-bottom');
-    for (const image of [top, bottom]) {
+    fixture.select(template);
+    const slots = template === 'post-stack' ? ['top', 'bottom'] : fourPhotoSlots.map(([slot]) => slot);
+    const images = slots.map((slot) => fixture.upload(`#post-photo-${slot}`));
+    for (const image of images) {
       image.naturalWidth = 1200;
       image.naturalHeight = 1200;
       await fixture.finish(image);
@@ -1507,9 +1507,138 @@ async function withPostInteractionApp(run) {
     function drawing(image) {
       return fixture.drawImageCalls.findLast(([drawnImage]) => drawnImage === image).slice(1);
     }
-    await run({ ...fixture, top, bottom, point, pointer, drawing });
+    const [top, bottom] = images;
+    await run({ ...fixture, top, bottom, images, point, pointer, drawing });
   });
 }
+
+const fourPhotoCenters = [[272, 362], [808, 362], [808, 1078], [272, 1078]];
+
+test('four-photo buttons, arrows, drags and recenter preserve every sibling crop', async () => {
+  await withPostInteractionApp(async ({ canvas, elements, images, drawing, pointer }) => {
+    const zoom = elements.get('#zoom');
+    const buttons = fourPhotoSlots.map(([slot]) => elements.get(`#post-select-${slot}`));
+    for (const [index, [x, y]] of fourPhotoCenters.entries()) {
+      const siblings = images.filter((_, slot) => slot !== index);
+      const siblingCrops = siblings.map(drawing);
+      const image = images[index];
+      const initialCrop = [x - 354, y - 354, 708, 708];
+
+      buttons[index].emit('click', { detail: 0 });
+      assert.deepEqual(buttons.map((button) => button.attributes.get('aria-pressed')), buttons.map((_, slot) => String(index === slot)));
+      zoom.value = '2';
+      zoom.emit('input');
+      canvas.emit('keydown', { key: 'ArrowRight', preventDefault() {} });
+      canvas.emit('keydown', { key: 'ArrowUp', shiftKey: true, preventDefault() {} });
+      assert.deepEqual(drawing(image), [x - 696, y - 756, 1416, 1416]);
+      assert.deepEqual(siblings.map(drawing), siblingCrops);
+
+      buttons[(index + 1) % buttons.length].emit('click', { detail: 0 });
+      const startX = x < 540 ? 525 : 555;
+      const distance = x < 540 ? 30 : -30;
+      pointer('pointerdown', startX, y);
+      assert.equal(buttons[index].attributes.get('aria-pressed'), 'true');
+      assert.equal(zoom.value, '2');
+      pointer('pointermove', startX + distance, y + 25);
+      pointer('pointerup', startX + distance, y + 25);
+      assert.deepEqual(drawing(image), [x - 696 + distance, y - 731, 1416, 1416]);
+      assert.deepEqual(siblings.map(drawing), siblingCrops);
+
+      elements.get('#recenter').emit('click', { detail: 0 });
+      assert.deepEqual(drawing(image), initialCrop);
+      assert.equal(zoom.value, '1');
+      assert.deepEqual(siblings.map(drawing), siblingCrops);
+      zoom.value = '1.25';
+      zoom.emit('input');
+    }
+  }, 'post-stack-4');
+});
+
+test('four-photo drag releases its target when pointer capture is lost', async () => {
+  await withPostInteractionApp(async ({ canvas, elements, images, drawing, pointer }) => {
+    pointer('pointerdown', 272, 362, 1);
+    const firstCrop = drawing(images[0]);
+    canvas.emit('lostpointercapture', { pointerType: 'mouse', pointerId: 1 });
+    pointer('pointermove', 310, 402, 1);
+    assert.deepEqual(drawing(images[0]), firstCrop, 'moves from an interrupted drag are ignored');
+
+    pointer('pointerdown', 808, 1078, 2);
+    assert.equal(elements.get('#post-select-bottom-right').attributes.get('aria-pressed'), 'true');
+    pointer('pointermove', 828, 1108, 2);
+    pointer('pointerup', 828, 1108, 2);
+    assert.deepEqual(drawing(images[2]), [474, 724, 708, 708]);
+  }, 'post-stack-4');
+});
+
+test('four-photo touch zoom and pan use the center of each starting frame', async () => {
+  await withPostInteractionApp(async ({ canvas, elements, images, point, drawing }) => {
+    for (const [index, [x, y]] of fourPhotoCenters.entries()) {
+      const siblings = images.filter((_, slot) => slot !== index);
+      const siblingCrops = siblings.map(drawing);
+      canvas.emit('touchstart', { touches: [point(x - 120, y), point(x - 20, y)] });
+      let prevented = 0;
+      canvas.emit('touchmove', {
+        touches: [point(x - 100, y + 24), point(x + 50, y + 24)],
+        preventDefault() { prevented++; },
+      });
+      assert.equal(prevented, 1);
+      assert.equal(elements.get('#zoom').value, '1.5');
+      assert.equal(elements.get(`#post-select-${fourPhotoSlots[index][0]}`).attributes.get('aria-pressed'), 'true');
+      assert.deepEqual(drawing(images[index]), [x - 451, y - 507, 1062, 1062]);
+      assert.deepEqual(siblings.map(drawing), siblingCrops);
+      canvas.emit('touchend', { touches: [] });
+    }
+  }, 'post-stack-4');
+});
+
+test('four-photo gaps and cross-frame starts keep touch movement native', async () => {
+  await withPostInteractionApp(async ({ canvas, elements, point, drawImageCalls }) => {
+    const count = drawImageCalls.length;
+    for (const touches of [
+      [point(4, 362), point(300, 362)],
+      [point(540, 362), point(300, 362)],
+      [point(300, 720), point(300, 362)],
+      [point(272, 362), point(808, 362)],
+      [point(272, 362), point(272, 1078)],
+    ]) {
+      canvas.emit('touchstart', { touches });
+      canvas.emit('touchmove', {
+        touches: [point(272, 362), point(350, 380)],
+        preventDefault() { assert.fail('invalid starts cannot capture a later move into a frame'); },
+      });
+      canvas.emit('touchend', { touches: [] });
+    }
+    assert.equal(elements.get('#post-select-bottom-left').attributes.get('aria-pressed'), 'true');
+
+    canvas.emit('pointerdown', { pointerType: 'touch', pointerId: 1, ...point(808, 362) });
+    canvas.emit('touchstart', { touches: [point(808, 362)] });
+    canvas.emit('touchmove', {
+      touches: [point(808, 1078)],
+      preventDefault() { assert.fail('one finger must leave scrolling native'); },
+    });
+    assert.equal(elements.get('#post-select-top-right').attributes.get('aria-pressed'), 'true');
+    assert.deepEqual(canvas.pointerCaptures, []);
+    assert.equal(drawImageCalls.length, count);
+  }, 'post-stack-4');
+});
+
+test('a released extra finger cannot restart a four-photo gesture after switching templates', async () => {
+  await withPostInteractionApp(async ({ canvas, point, select, drawImageCalls, elements }) => {
+    const pair = [point(180, 362), point(280, 362)];
+    canvas.emit('touchstart', { touches: pair });
+    canvas.emit('touchstart', { touches: [...pair, point(300, 362)] });
+    select('post-stack');
+    select('post-stack-4');
+    canvas.emit('touchend', { touches: pair });
+    const count = drawImageCalls.length;
+    canvas.emit('touchmove', {
+      touches: [point(170, 382), point(320, 382)],
+      preventDefault() { assert.fail('contacts from the canceled gesture must remain native'); },
+    });
+    assert.equal(drawImageCalls.length, count);
+    assert.equal(elements.get('#zoom').value, '1');
+  }, 'post-stack-4');
+});
 
 test('selects and drags only the Post frame where pointerdown begins', async () => {
   await withPostInteractionApp(async ({ canvas, elements, top, bottom, pointer, drawing, drawImageCalls }) => {

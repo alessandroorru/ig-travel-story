@@ -422,6 +422,20 @@ input[type="range"] {
   gap: 0.5rem;
 }
 
+#post-stack-4-fields .post-slot-selector .button {
+  min-height: 2.75rem;
+  padding: 0.5rem 0.75rem;
+}
+
+/* Mirror the preview while keeping keyboard navigation clockwise. */
+#post-select-bottom-right {
+  grid-area: 2 / 2;
+}
+
+#post-select-bottom-left {
+  grid-area: 2 / 1;
+}
+
 .post-slot-selector .button[aria-pressed="true"] {
   border-color: #ff3b30;
   background: #291917;

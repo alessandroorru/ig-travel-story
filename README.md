@@ -1,6 +1,6 @@
 # Instagram Template Generator
 
-`ig-travel-story` è una micro-app statica per comporre nel browser immagini Instagram e scaricarle in PNG. Offre due template Story da **1080 × 1920 px** e il template Post **Stack fotografico** da **1080 × 1440 px** (3:4). Non richiede framework, dipendenze runtime o build.
+`ig-travel-story` è una micro-app statica per comporre nel browser immagini Instagram e scaricarle in PNG. Offre due template Story da **1080 × 1920 px** e due template Post da **1080 × 1440 px** (3:4), **Stack fotografico** e **Stack fotografico ×4**. Non richiede framework, dipendenze runtime o build.
 
 ## Uso locale
 
@@ -12,17 +12,20 @@ python3 -m http.server 8000
 
 Poi visita [http://localhost:8000](http://localhost:8000).
 
-1. Scegli un template dalla galleria: **Fotogramma** (Cinema) e **Cartolina corsiva** hanno badge Story; **Stack fotografico** ha badge Post.
-2. Carica una fotografia per i template Story oppure le due immagini richieste da Stack fotografico: **Foto superiore** e **Foto inferiore**. Fotogramma usa giorno, giorni totali, titolo e fino a tre osservazioni; Cartolina corsiva usa solo il testo centrale, fino a cinque righe. Stack fotografico contiene soltanto le due foto.
-3. Su desktop, trascina la foto con mouse o penna, usa le frecce (Maiusc per passi più ampi) e regola lo zoom con lo slider continuo.
+1. Scegli un template dalla galleria. **Fotogramma** (Cinema) e **Cartolina corsiva** hanno badge Story. **Stack fotografico** e **Stack fotografico ×4** hanno badge Post.
+2. Carica una fotografia per una Story, due per Stack fotografico o quattro per Stack fotografico ×4. Fotogramma usa giorno, giorni totali, titolo e fino a tre osservazioni. Cartolina corsiva usa solo il testo centrale, fino a cinque righe. Gli Stack contengono soltanto le fotografie.
+3. Su desktop, trascina la foto con mouse o penna, usa le frecce quando l'anteprima ha il focus (Maiusc per passi più ampi) e regola lo zoom con lo slider continuo.
 4. Su mobile, un dito continua a far scorrere la pagina; usa due dita per spostare e ingrandire/ridurre la foto, tra 1× e 3×. **Ricentra** ripristina posizione e zoom.
 5. Su mobile compatibile, premi **Salva o condividi PNG** e nel foglio nativo scegli **Salva immagine**. Se la condivisione file non è disponibile, premi **Scarica PNG**. La risoluzione segue il template: 1080 × 1920 per Story, 1080 × 1440 per Post.
 
-### Inquadrature di Stack fotografico
+### Inquadrature dei Post
 
-Il Post dispone due foto in riquadri uguali da 1064 × 708 px, con bordo bianco esterno e separatore centrale uniformi di **8 px**. Richiede entrambe le foto per attivare l'esportazione e salva il file come `instagram-post-stack.png`.
+- **Stack fotografico** dispone la foto superiore e quella inferiore in due riquadri da 1064 × 708 px. Salva il file come `instagram-post-stack.png`.
+- **Stack fotografico ×4** dispone quattro riquadri da 528 × 708 px in senso orario. La foto 1 va in alto a sinistra, la 2 in alto a destra, la 3 in basso a destra e la 4 in basso a sinistra. Salva il file come `instagram-post-stack-4.png`.
 
-Clicca o tocca il riquadro da modificare: il contorno rosso dell'anteprima e il testo di aiuto indicano la foto attiva. Anche caricare una foto ne attiva il riquadro. Lo slider, il valore dello zoom, le frecce e **Ricentra** si riferiscono sempre alla foto attiva; ciascuna foto conserva la propria inquadratura indipendente. Il contorno rosso serve soltanto nell'interfaccia e non compare nel PNG.
+Entrambi i Post esportano a 1080 × 1440 px, con bordo bianco esterno e separatori di **8 px**. Carica tutte le foto richieste per abilitare l'esportazione.
+
+Clicca o tocca il riquadro da modificare oppure scegli il pulsante corrispondente sotto **Foto da modificare**. Il contorno rosso dell'anteprima e il testo di aiuto indicano la foto attiva. Anche caricare una foto ne attiva il riquadro. Lo slider, il valore dello zoom, le frecce e **Ricentra** si riferiscono alla foto attiva. Ciascuna foto conserva la propria inquadratura. Il contorno rosso serve soltanto nell'interfaccia e non compare nel PNG.
 
 Il trascinamento desktop continua a modificare il riquadro nel quale è iniziato, anche se il puntatore attraversa il separatore. Su mobile, entrambe le dita devono iniziare nello stesso riquadro: la gesture ne regola posizione e zoom rispetto al centro di quella foto. Due dita in riquadri diversi e gesti iniziati sul bordo o sul separatore vengono ignorati. Un dito seleziona il riquadro senza bloccare lo scorrimento della pagina.
 
