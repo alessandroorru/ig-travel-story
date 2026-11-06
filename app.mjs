@@ -5,31 +5,20 @@ import {
   renderStory,
 } from './story-renderer.mjs';
 import { calculatePinchTransform, calculateTouchGeometry } from './touch-geometry.mjs';
-import { getTemplateDefinition } from './template-definitions.mjs';
-import { POST_STACK_LAYOUT, postSlotAtPoint } from './post-stack-geometry.mjs';
+import { getTemplateDefinition, TEMPLATE_DEFINITIONS } from './template-definitions.mjs';
+import { getPostLayout, postSlotAtPoint } from './post-stack-geometry.mjs';
 
 const form = document.querySelector('#story-form');
 const appShell = document.querySelector('.app-shell');
 const editor = document.querySelector('.editor');
 const preview = document.querySelector('.preview');
-const templateInputs = [
-  document.querySelector('#template-cinema'),
-  document.querySelector('#template-postcard'),
-  document.querySelector('#template-post-stack'),
-];
+const templateDefinitions = Object.values(TEMPLATE_DEFINITIONS);
+const templateInputs = templateDefinitions.map(({ id }) => document.querySelector(`#template-${id}`));
+const postTemplates = templateDefinitions.filter(({ format }) => format === 'post');
 const cinemaFields = document.querySelector('#cinema-fields');
 const postcardFields = document.querySelector('#postcard-fields');
 const storyPhotoFields = document.querySelector('#story-photo-fields');
-const postStackFields = document.querySelector('#post-stack-fields');
 const photoInput = document.querySelector('#photo');
-const postPhotoInputs = {
-  top: document.querySelector('#post-photo-top'),
-  bottom: document.querySelector('#post-photo-bottom'),
-};
-const postSlotButtons = {
-  top: document.querySelector('#post-select-top'),
-  bottom: document.querySelector('#post-select-bottom'),
-};
 const canvasStage = document.querySelector('.canvas-stage');
 const previewTitle = document.querySelector('#preview-title');
 const canvasInstructions = document.querySelector('#canvas-instructions');
@@ -59,8 +48,11 @@ const state = {
   image: null,
   imageUrl: null,
   imageRequest: 0,
-  postSlots: { top: createMediaState(), bottom: createMediaState() },
-  activePostSlot: 'top',
+  postMedia: Object.fromEntries(postTemplates.map(({ id }) => {
+    const slotNames = Object.keys(getPostLayout(id).frames);
+    const slots = Object.fromEntries(slotNames.map((slot) => [slot, createMediaState()]));
+    return [id, { activeSlot: slotNames[0], slots }];
+  })),
   day: 1,
   totalDays: 35,
   title: 'Welcome to Kuala Lumpur',
@@ -70,6 +62,22 @@ const state = {
   offsetX: 0,
   offsetY: 0,
 };
+
+const postControls = Object.fromEntries(postTemplates.map(({ id }) => {
+  const fields = document.querySelector(`#${id}-fields`);
+  const slots = Object.fromEntries(Object.keys(state.postMedia[id].slots).map((slot) => {
+    const suffix = slot.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+    return [slot, {
+      input: document.querySelector(`#post-photo-${suffix}`),
+      button: document.querySelector(`#post-select-${suffix}`),
+    }];
+  }));
+  return [id, { fields, slots }];
+}));
+const postPhotoInputs = Object.values(postControls).flatMap(({ slots }) => (
+  Object.values(slots).map(({ input }) => input)
+));
+const mediaInputs = [photoInput, zoomInput, ...postPhotoInputs];
 
 let activePointer = null;
 let activeTouchGesture = null;
@@ -104,8 +112,13 @@ function describeCanvasContext(targetContext) {
   return `Anteprima: ${colorSpace}, ${colorType}.`;
 }
 
+function getActivePost() {
+  return state.postMedia[state.template];
+}
+
 function getActiveMediaState() {
-  return state.template === 'post-stack' ? state.postSlots[state.activePostSlot] : state;
+  const post = getActivePost();
+  return post ? post.slots[post.activeSlot] : state;
 }
 
 function synchronizeResponsiveOrder(isMobile) {
@@ -130,17 +143,17 @@ function syncZoomControl() {
 }
 
 function syncActiveMediaPresentation() {
-  const isPost = state.template === 'post-stack';
-  const activeLabel = state.activePostSlot === 'top' ? 'Foto superiore' : 'Foto inferiore';
-  const selectionHelp = isPost ? `${activeLabel} attiva.\nTocca o clicca un riquadro per selezionarlo. ` : '';
+  const post = getActivePost();
+  const activeLabel = post ? postControls[state.template].slots[post.activeSlot].input.labels[0].textContent : '';
+  const selectionHelp = post ? `${activeLabel} attiva.\nTocca o clicca un riquadro per selezionarlo. ` : '';
   const instructions = `${selectionHelp}Trascina la foto o usa i tasti freccia. Tieni premuto Maiusc per spostarla più velocemente. ${colorContextDescription}`;
   if (canvasInstructions.textContent !== instructions) canvasInstructions.textContent = instructions;
-  for (const [slot, button] of Object.entries(postSlotButtons)) {
-    button.setAttribute('aria-pressed', String(slot === state.activePostSlot));
-  }
-  postSelectionGuide.hidden = !isPost;
-  if (isPost) {
-    const frame = POST_STACK_LAYOUT.frames[state.activePostSlot];
+  postSelectionGuide.hidden = !post;
+  if (post) {
+    for (const [slot, { button }] of Object.entries(postControls[state.template].slots)) {
+      button.setAttribute('aria-pressed', String(slot === post.activeSlot));
+    }
+    const frame = getPostLayout(state.template).frames[post.activeSlot];
     Object.assign(postSelectionGuide.style, {
       left: `${frame.x / canvas.width * 100}%`,
       top: `${frame.y / canvas.height * 100}%`,
@@ -151,8 +164,9 @@ function syncActiveMediaPresentation() {
 }
 
 function selectPostSlot(slot) {
-  if (!slot) return;
-  state.activePostSlot = slot;
+  const post = getActivePost();
+  if (!post?.slots[slot]) return;
+  post.activeSlot = slot;
   syncZoomControl();
   syncActiveMediaPresentation();
 }
@@ -175,7 +189,7 @@ function syncTemplatePresentation() {
   syncActiveMediaPresentation();
   storyOverlay.toggleAttribute('hidden', isPost);
   storyPhotoFields.hidden = isPost;
-  postStackFields.hidden = !isPost;
+  for (const [id, { fields }] of Object.entries(postControls)) fields.hidden = id !== state.template;
   cinemaFields.hidden = state.template !== 'cinema';
   postcardFields.hidden = state.template !== 'postcard';
   for (const input of templateInputs) input.checked = input.value === state.template;
@@ -205,9 +219,8 @@ function updateAvailability(statusWhenValid) {
   const showDayError = state.template === 'cinema' && !validRange;
   dayInput.setAttribute('aria-invalid', String(showDayError));
   totalDaysInput.setAttribute('aria-invalid', String(showDayError));
-  const hasRequiredPhotos = state.template === 'post-stack'
-    ? Boolean(state.postSlots.top.image && state.postSlots.bottom.image)
-    : Boolean(state.image);
+  const post = getActivePost();
+  const hasRequiredPhotos = post ? Object.values(post.slots).every(({ image }) => image) : Boolean(state.image);
   downloadButton.disabled = !hasRequiredPhotos || !validRange;
 
   if (!validRange) {
@@ -285,6 +298,8 @@ const canSharePngFile = supportsPngFileShare();
 downloadButton.textContent = canSharePngFile ? 'Salva o condividi PNG' : 'Scarica PNG';
 
 function filenameForTemplate(templateId) {
+  const { exportFilename } = getTemplateDefinition(templateId);
+  if (exportFilename) return exportFilename;
   if (templateId === 'post-stack') return 'instagram-post-stack.png';
   return templateId === 'postcard'
     ? 'travel-story-postcard.png'
@@ -339,18 +354,19 @@ function drawEmptyCanvas() {
 
 function redraw() {
   syncTemplatePresentation();
-  if (state.template !== 'post-stack' && !state.image) {
+  const post = getActivePost();
+  if (!post && !state.image) {
     drawEmptyCanvas();
     return;
   }
 
-  renderStory(context, state);
+  renderStory(context, post ? { template: state.template, postSlots: post.slots } : state);
 }
 
-function clampOffsets(media = getActiveMediaState(), slot = state.template === 'post-stack' ? state.activePostSlot : null) {
+function clampOffsets(media = getActiveMediaState(), slot = getActivePost()?.activeSlot) {
   if (!media.image) return;
   const frame = slot
-    ? POST_STACK_LAYOUT.frames[slot]
+    ? getPostLayout(state.template).frames[slot]
     : { width: canvas.width, height: canvas.height };
   const placement = computeImagePlacement(
     media.image.naturalWidth, media.image.naturalHeight,
@@ -377,11 +393,14 @@ function updateTextState() {
   redraw();
 }
 
-function loadPhoto(file, mediaState = state) {
+function loadPhoto(file, templateId, slot) {
+  const post = state.postMedia[templateId];
+  const mediaState = post ? post.slots[slot] : state;
+  const canUpdatePresentation = () => !post || state.template === templateId;
   const request = ++mediaState.imageRequest;
   if (!file) return;
   if (!file.type.startsWith('image/')) {
-    setStatus('Scegli un file immagine valido. L’anteprima precedente non è stata modificata.');
+    if (canUpdatePresentation()) setStatus('Scegli un file immagine valido. L’anteprima precedente non è stata modificata.');
     return;
   }
 
@@ -400,18 +419,18 @@ function loadPhoto(file, mediaState = state) {
     mediaState.zoom = 1;
     mediaState.offsetX = 0;
     mediaState.offsetY = 0;
-    const loadedSlot = Object.keys(state.postSlots).find((slot) => state.postSlots[slot] === mediaState);
-    if (loadedSlot) state.activePostSlot = loadedSlot;
-    syncZoomControl();
-    updateAvailability('Fotografia caricata. Puoi regolare l’inquadratura.');
-    redraw();
-
+    if (post) post.activeSlot = slot;
+    if (canUpdatePresentation()) {
+      syncZoomControl();
+      updateAvailability('Fotografia caricata. Puoi regolare l’inquadratura.');
+      redraw();
+    }
     if (previousUrl) URL.revokeObjectURL(previousUrl);
   }, { once: true });
 
   nextImage.addEventListener('error', () => {
     URL.revokeObjectURL(nextUrl);
-    if (request === mediaState.imageRequest) {
+    if (request === mediaState.imageRequest && canUpdatePresentation()) {
       setStatus('Impossibile leggere questa immagine. L’anteprima precedente non è stata modificata.');
     }
   }, { once: true });
@@ -419,7 +438,7 @@ function loadPhoto(file, mediaState = state) {
   nextImage.src = nextUrl;
 }
 
-function moveImage(deltaX, deltaY, media = getActiveMediaState(), slot = state.template === 'post-stack' ? state.activePostSlot : null) {
+function moveImage(deltaX, deltaY, media = getActiveMediaState(), slot = getActivePost()?.activeSlot) {
   if (!media.image) return;
   media.offsetX += deltaX;
   media.offsetY += deltaY;
@@ -443,10 +462,10 @@ function getTouchGesture(touches) {
 
   let slot = null;
   let frame = { x: 0, y: 0, width: canvas.width, height: canvas.height };
-  if (state.template === 'post-stack') {
-    slot = postSlotAtPoint(points[0].x, points[0].y);
-    if (!slot || slot !== postSlotAtPoint(points[1].x, points[1].y)) return null;
-    frame = POST_STACK_LAYOUT.frames[slot];
+  if (getActivePost()) {
+    slot = postSlotAtPoint(state.template, points[0].x, points[0].y);
+    if (!slot || slot !== postSlotAtPoint(state.template, points[1].x, points[1].y)) return null;
+    frame = getPostLayout(state.template).frames[slot];
   }
   return { slot, ...calculateTouchGeometry(points, frame) };
 }
@@ -454,7 +473,7 @@ function getTouchGesture(touches) {
 function resetTouchGesture(touches) {
   const gesture = getTouchGesture(Array.from(touches));
   if (gesture?.slot) selectPostSlot(gesture.slot);
-  const media = gesture?.slot ? state.postSlots[gesture.slot] : state;
+  const media = gesture?.slot ? getActivePost().slots[gesture.slot] : state;
   activeTouchGesture = media.image ? gesture : null;
 }
 
@@ -471,7 +490,7 @@ function applyTouchGesture(touches) {
     return true;
   }
 
-  const media = currentGesture.slot ? state.postSlots[currentGesture.slot] : state;
+  const media = currentGesture.slot ? getActivePost().slots[currentGesture.slot] : state;
   const nextState = calculatePinchTransform({
     zoom: media.zoom,
     offsetX: media.offsetX,
@@ -503,16 +522,17 @@ photoInput.addEventListener('change', () => {
   loadPhoto(photoInput.files?.[0]);
 });
 
-for (const [slot, input] of Object.entries(postPhotoInputs)) {
-  input.addEventListener('change', () => loadPhoto(input.files?.[0], state.postSlots[slot]));
-}
-
-for (const [slot, button] of Object.entries(postSlotButtons)) {
-  button.addEventListener('click', () => selectPostSlot(slot));
+for (const [id, { slots }] of Object.entries(postControls)) {
+  for (const [slot, { input, button }] of Object.entries(slots)) {
+    input.addEventListener('change', () => loadPhoto(input.files?.[0], id, slot));
+    button.addEventListener('click', () => {
+      if (state.template === id) selectPostSlot(slot);
+    });
+  }
 }
 
 form.addEventListener('input', (event) => {
-  if (![photoInput, ...Object.values(postPhotoInputs), zoomInput].includes(event.target)) updateTextState();
+  if (!mediaInputs.includes(event.target)) updateTextState();
 });
 
 for (const templateInput of templateInputs) {
@@ -545,11 +565,10 @@ canvas.addEventListener('pointerdown', (event) => {
   if (event.pointerType === 'touch' || activePointer) return;
   const point = canvasPointFromClient(event.clientX, event.clientY);
   if (!point) return;
-  const slot = state.template === 'post-stack' ? postSlotAtPoint(point.x, point.y) : null;
-  if (state.template === 'post-stack') {
-    if (!slot) return;
-    selectPostSlot(slot);
-  }
+  const post = getActivePost();
+  const slot = post ? postSlotAtPoint(state.template, point.x, point.y) : null;
+  if (post && !slot) return;
+  if (slot) selectPostSlot(slot);
   const media = getActiveMediaState();
   if (!media.image) return;
   activePointer = { id: event.pointerId, point, media, slot };
@@ -572,10 +591,10 @@ canvas.addEventListener('pointerup', finishPointer);
 canvas.addEventListener('pointercancel', finishPointer);
 
 canvas.addEventListener('touchstart', (event) => {
-  if (state.template === 'post-stack' && event.touches.length === 1) {
+  if (getActivePost() && event.touches.length === 1) {
     const touch = event.touches[0];
     const point = canvasPointFromClient(touch.clientX, touch.clientY);
-    if (point) selectPostSlot(postSlotAtPoint(point.x, point.y));
+    if (point) selectPostSlot(postSlotAtPoint(state.template, point.x, point.y));
   }
   resetTouchGesture(event.touches);
 });

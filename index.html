@@ -62,6 +62,18 @@
                 <span class="template-option__badge"><span class="template-option__format-icon template-option__format-icon--post" aria-hidden="true"></span>Post</span>
                 <span class="template-option__check" aria-hidden="true">✓</span>
               </label>
+              <input id="template-post-stack-4" class="template-picker__radio" type="radio" name="template" value="post-stack-4">
+              <label class="template-option" for="template-post-stack-4">
+                <span class="template-thumbnail template-thumbnail--post-stack-4" aria-hidden="true">
+                  <span class="template-thumbnail__panel template-thumbnail__panel--top"></span>
+                  <span class="template-thumbnail__panel template-thumbnail__panel--bottom"></span>
+                  <span class="template-thumbnail__panel template-thumbnail__panel--slate"></span>
+                  <span class="template-thumbnail__panel template-thumbnail__panel--ochre"></span>
+                </span>
+                <span class="template-option__name">Stack fotografico ×4</span>
+                <span class="template-option__badge"><span class="template-option__format-icon template-option__format-icon--post" aria-hidden="true"></span>Post</span>
+                <span class="template-option__check" aria-hidden="true">✓</span>
+              </label>
             </div>
           </fieldset>
 
@@ -85,6 +97,34 @@
               <div class="post-slot-selector" role="group" aria-labelledby="post-slot-label">
                 <button id="post-select-top" type="button" class="button button--secondary" aria-label="Modifica foto superiore" aria-pressed="true">Superiore</button>
                 <button id="post-select-bottom" type="button" class="button button--secondary" aria-label="Modifica foto inferiore" aria-pressed="false">Inferiore</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="post-stack-4-fields" hidden>
+            <div class="field field--file">
+              <label for="post-photo-top-left">Foto 1 · Alto a sinistra</label>
+              <input id="post-photo-top-left" name="post-photo-top-left" type="file" accept="image/*">
+            </div>
+            <div class="field field--file">
+              <label for="post-photo-top-right">Foto 2 · Alto a destra</label>
+              <input id="post-photo-top-right" name="post-photo-top-right" type="file" accept="image/*">
+            </div>
+            <div class="field field--file">
+              <label for="post-photo-bottom-right">Foto 3 · Basso a destra</label>
+              <input id="post-photo-bottom-right" name="post-photo-bottom-right" type="file" accept="image/*">
+            </div>
+            <div class="field field--file">
+              <label for="post-photo-bottom-left">Foto 4 · Basso a sinistra</label>
+              <input id="post-photo-bottom-left" name="post-photo-bottom-left" type="file" accept="image/*">
+            </div>
+            <div class="field">
+              <p id="post-stack-4-slot-label" class="field__hint">Foto da modificare</p>
+              <div class="post-slot-selector" role="group" aria-labelledby="post-stack-4-slot-label">
+                <button id="post-select-top-left" type="button" class="button button--secondary" aria-label="Modifica foto 1 · alto a sinistra" aria-pressed="true">Foto 1</button>
+                <button id="post-select-top-right" type="button" class="button button--secondary" aria-label="Modifica foto 2 · alto a destra" aria-pressed="false">Foto 2</button>
+                <button id="post-select-bottom-right" type="button" class="button button--secondary" aria-label="Modifica foto 3 · basso a destra" aria-pressed="false">Foto 3</button>
+                <button id="post-select-bottom-left" type="button" class="button button--secondary" aria-label="Modifica foto 4 · basso a sinistra" aria-pressed="false">Foto 4</button>
               </div>
             </div>
           </div>

@@ -132,7 +132,8 @@ legend span {
 
 #cinema-fields,
 #postcard-fields,
-#post-stack-fields {
+#post-stack-fields,
+#post-stack-4-fields {
   display: grid;
   gap: 1.2rem;
 }
@@ -225,6 +226,7 @@ legend span {
     linear-gradient(145deg, #8f9277, #27362f 70%);
 }
 
+.template-thumbnail--post-stack-4,
 .template-thumbnail--post-stack {
   aspect-ratio: 3 / 4;
   grid-template-rows: 1fr 1fr;
@@ -233,12 +235,24 @@ legend span {
   background: #f7f7f4;
 }
 
+.template-thumbnail--post-stack-4 {
+  grid-template-columns: 1fr 1fr;
+}
+
 .template-thumbnail__panel--top {
   background: linear-gradient(145deg, #8f9277, #27362f);
 }
 
 .template-thumbnail__panel--bottom {
   background: linear-gradient(145deg, #6b5440, #171816);
+}
+
+.template-thumbnail__panel--slate {
+  background: linear-gradient(145deg, #72838d, #26333d);
+}
+
+.template-thumbnail__panel--ochre {
+  background: linear-gradient(145deg, #ad8d5f, #513929);
 }
 
 .template-thumbnail__postcard-copy {

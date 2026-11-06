@@ -8,6 +8,13 @@ const appUrl = new URL('../app.mjs', import.meta.url);
 const app = existsSync(appUrl) ? readFileSync(appUrl, 'utf8') : '';
 const renderer = readFileSync(new URL('../story-renderer.mjs', import.meta.url), 'utf8');
 
+const fourPhotoSlots = [
+  ['top-left', 'Foto 1 · Alto a sinistra'],
+  ['top-right', 'Foto 2 · Alto a destra'],
+  ['bottom-right', 'Foto 3 · Basso a destra'],
+  ['bottom-left', 'Foto 4 · Basso a sinistra'],
+];
+
 function elementWithId(tagName, id) {
   const match = html.match(new RegExp(`<${tagName}\\b[^>]*\\bid=["']${id}["'][^>]*>`, 'i'));
   assert.ok(match, `missing ${tagName}#${id}`);
@@ -308,12 +315,10 @@ function createAppFixture() {
     ['#template-cinema', Object.assign(new FakeElement('cinema'), { checked: true })],
     ['#template-postcard', Object.assign(new FakeElement('postcard'), { checked: false })],
     ['#template-post-stack', Object.assign(new FakeElement('post-stack'), { checked: false })],
+    ['#template-post-stack-4', Object.assign(new FakeElement('post-stack-4'), { checked: false })],
     ['#story-photo-fields', new FakeElement()],
     ['#post-stack-fields', Object.assign(new FakeElement(), { hidden: true })],
-    ['#post-photo-top', new FakeElement()],
-    ['#post-photo-bottom', new FakeElement()],
-    ['#post-select-top', Object.assign(new FakeElement(), { disabled: false })],
-    ['#post-select-bottom', Object.assign(new FakeElement(), { disabled: false })],
+    ['#post-stack-4-fields', Object.assign(new FakeElement(), { hidden: true })],
     ['#preview-title', new FakeElement()],
     ['#canvas-instructions', new FakeElement()],
     ['#instagram-preview-overlay', new FakeElement()],
@@ -336,6 +341,11 @@ function createAppFixture() {
     ['#status', new FakeElement()],
     ['#story-canvas', new FakeElement()],
   ]);
+  for (const [slot, label] of [['top', 'Foto superiore'], ['bottom', 'Foto inferiore'], ...fourPhotoSlots]) {
+    elements.set(`#post-photo-${slot}`, Object.assign(new FakeElement(), { labels: [{ textContent: label }] }));
+    elements.set(`#post-select-${slot}`, Object.assign(new FakeElement(), { disabled: false }));
+  }
+
   const canvas = elements.get('#story-canvas');
   canvas.width = 1080;
   canvas.height = 1920;
@@ -1192,6 +1202,7 @@ test('offers a Post stack card with compact Story and Post badges', () => {
     ['cinema', 'Story', 'Fotogramma'],
     ['postcard', 'Story', 'Cartolina corsiva'],
     ['post-stack', 'Post', 'Stack fotografico'],
+    ['post-stack-4', 'Post', 'Stack fotografico ×4'],
   ]) {
     const radio = elementWithId('input', `template-${id}`);
     assertAttribute(radio, 'type', 'radio');
@@ -1199,7 +1210,7 @@ test('offers a Post stack card with compact Story and Post badges', () => {
     assertAttribute(radio, 'value', id);
     const card = html.match(new RegExp(`<label\\b[^>]*for=["']template-${id}["'][^>]*>([\\s\\S]*?)<\\/label>`, 'i'))?.[1];
     assert.ok(card, `missing label for ${id}`);
-    assert.match(card, new RegExp(label));
+    assert.ok(card.includes(`<span class="template-option__name">${label}</span>`));
     assert.match(card, new RegExp(`<span class=["']template-option__badge["'][^>]*>[\\s\\S]*?${format}\\s*<\\/span>`));
     assert.doesNotMatch(card, /1080|1920|1440|9\s*:\s*16|3\s*:\s*4/);
   }
@@ -1273,7 +1284,7 @@ async function withAsyncApp(run, { preferred = 'supported', attributes = { color
     replaceGlobal('File', FakeShareFile),
   ];
   function select(template) {
-    for (const id of ['cinema', 'postcard', 'post-stack']) fixture.elements.get(`#template-${id}`).checked = id === template;
+    for (const id of ['cinema', 'postcard', 'post-stack', 'post-stack-4']) fixture.elements.get(`#template-${id}`).checked = id === template;
     fixture.elements.get(`#template-${template}`).emit('change');
   }
   function upload(selector, type = 'image/jpeg') {
@@ -1319,12 +1330,13 @@ test('resizes and describes the canvas for Story and Post templates', async () =
 test('shows only the upload and content fields required by the active template', async () => {
   await withAsyncApp(async ({ select, elements }) => {
     for (const [template, expected] of [
-      ['cinema', [false, true, false, true]],
-      ['postcard', [false, true, true, false]],
-      ['post-stack', [true, false, true, true]],
+      ['cinema', [false, true, true, false, true]],
+      ['postcard', [false, true, true, true, false]],
+      ['post-stack', [true, false, true, true, true]],
+      ['post-stack-4', [true, true, false, true, true]],
     ]) {
       select(template);
-      assert.deepEqual(['#story-photo-fields', '#post-stack-fields', '#cinema-fields', '#postcard-fields'].map((id) => elements.get(id).hidden), expected);
+      assert.deepEqual(['#story-photo-fields', '#post-stack-fields', '#post-stack-4-fields', '#cinema-fields', '#postcard-fields'].map((id) => elements.get(id).hidden), expected);
       assert.equal(elements.get(`#template-${template}`).checked, true);
     }
   });
@@ -1713,4 +1725,154 @@ test('selects both Post photos with keyboard-accessible controls and preserves t
     assert.equal(elements.get('#post-stack-fields').hidden, false);
     assert.equal(topButton.attributes.get('aria-pressed'), 'true');
   });
+});
+
+test('labels and orders the four Post uploads clockwise with native selection buttons', () => {
+  const start = html.indexOf(elementWithId('div', 'post-stack-4-fields'));
+  const controls = html.slice(start, html.indexOf('<div class="field field--zoom">', start));
+  assert.match(elementWithId('div', 'post-stack-4-fields'), /\bhidden\b/);
+  assert.match(controls, /role="group" aria-labelledby="post-stack-4-slot-label"/);
+  assert.match(controls, /id="post-stack-4-slot-label"[^>]*>Foto da modificare<\/p>/);
+
+  let previousInput = -1;
+  let previousButton = -1;
+  for (const [index, [slot, label]] of fourPhotoSlots.entries()) {
+    const input = elementWithId('input', `post-photo-${slot}`);
+    const button = elementWithId('button', `post-select-${slot}`);
+    assertAttribute(input, 'type', 'file');
+    assertAttribute(input, 'accept', 'image/\\*');
+    assert.ok(controls.includes(`<label for="post-photo-${slot}">${label}</label>`));
+    assertAttribute(button, 'type', 'button');
+    assertAttribute(button, 'aria-pressed', String(index === 0));
+    assertAttribute(button, 'aria-label', `Modifica ${label.toLowerCase()}`);
+    assert.doesNotMatch(button, /\bdisabled\b|tabindex=["']-1["']/);
+    assert.ok(controls.indexOf(input) > previousInput);
+    assert.ok(controls.indexOf(button) > previousButton);
+    previousInput = controls.indexOf(input);
+    previousButton = controls.indexOf(button);
+  }
+});
+
+test('resolves four-photo requests independently across replacements and a rejected file', async () => {
+  await withAsyncApp(async ({ select, upload, finish, drawImageCalls, revoked, elements }) => {
+    select('post-stack-4');
+    const images = fourPhotoSlots.map(([slot]) => upload(`#post-photo-${slot}`));
+    assert.ok(images.every(Boolean), 'every four-photo upload starts its own decode');
+    for (const index of [3, 1, 2, 0]) await finish(images[index]);
+    assert.deepEqual(drawImageCalls.slice(-4).map(([image]) => image), images);
+
+    const staleFirst = upload('#post-photo-top-left');
+    const third = upload('#post-photo-bottom-right');
+    const first = upload('#post-photo-top-left');
+    const rejectedFourth = upload('#post-photo-bottom-left');
+    assert.equal(upload('#post-photo-bottom-left', 'text/plain'), null);
+
+    await finish(first);
+    await finish(rejectedFourth);
+    await finish(third);
+    await finish(staleFirst);
+
+    assert.deepEqual(drawImageCalls.slice(-4).map(([image]) => image), [first, images[1], third, images[3]]);
+    assert.deepEqual(revoked, [images[0].src, rejectedFourth.src, images[2].src, staleFirst.src]);
+    assert.equal(elements.get('#download').disabled, false, 'rejected replacement preserves the last valid photo');
+    assert.equal(elements.get('#post-select-bottom-right').attributes.get('aria-pressed'), 'true');
+  });
+});
+
+test('restores each Post selection, images and crop through repeated switches', async () => {
+  await withAsyncApp(async ({ canvas, select, upload, finish, elements, drawImageCalls, revoked }) => {
+    select('post-stack');
+    const top = upload('#post-photo-top');
+    const bottom = upload('#post-photo-bottom');
+    assert.ok(top && bottom);
+    await finish(top);
+    await finish(bottom);
+
+    const zoom = elements.get('#zoom');
+    zoom.value = '1.5';
+    zoom.emit('input');
+    canvas.emit('keydown', { key: 'ArrowRight', preventDefault() {} });
+    const twoPhotoDrawings = drawImageCalls.slice(-2);
+
+    select('post-stack-4');
+    const images = fourPhotoSlots.map(([slot]) => upload(`#post-photo-${slot}`));
+    assert.ok(images.every(Boolean), 'four-photo slots are bound to their own uploads');
+    for (const image of images) await finish(image);
+    const pressed = () => fourPhotoSlots.map(([slot]) => elements.get(`#post-select-${slot}`).attributes.get('aria-pressed'));
+    for (const [index, [slot]] of fourPhotoSlots.entries()) {
+      elements.get(`#post-select-${slot}`).emit('click', { detail: 0 });
+      assert.deepEqual(pressed(), [0, 1, 2, 3].map((key) => String(key === index)));
+    }
+    zoom.value = '2';
+    zoom.emit('input');
+    canvas.emit('keydown', { key: 'ArrowLeft', preventDefault() {} });
+    const fourPhotoDrawings = drawImageCalls.slice(-4);
+
+    const pending = upload('#post-photo-top-right');
+    select('post-stack');
+    const twoPhotoInstructions = elements.get('#canvas-instructions').textContent;
+    upload('#post-photo-top', 'text/plain');
+    const twoPhotoStatus = elements.get('#status').textContent;
+    await finish(pending);
+    assert.equal(elements.get('#canvas-instructions').textContent, twoPhotoInstructions);
+    assert.equal(elements.get('#status').textContent, twoPhotoStatus);
+    assert.deepEqual(drawImageCalls.slice(-2), twoPhotoDrawings);
+    assert.equal(zoom.value, '1.5');
+
+    select('post-stack-4');
+    assert.deepEqual(pressed(), ['false', 'true', 'false', 'false']);
+    assert.deepEqual(drawImageCalls.slice(-4).map(([image]) => image), [images[0], pending, images[2], images[3]]);
+    assert.equal(zoom.value, '1');
+    elements.get('#post-select-bottom-left').emit('click', { detail: 0 });
+
+    for (let iteration = 0; iteration < 3; iteration++) {
+      select('post-stack');
+      assert.equal(elements.get('#post-select-bottom').attributes.get('aria-pressed'), 'true');
+      assert.deepEqual(drawImageCalls.slice(-2), twoPhotoDrawings);
+      assert.equal(zoom.value, '1.5');
+
+      select('post-stack-4');
+      assert.deepEqual(pressed(), ['false', 'false', 'false', 'true']);
+      assert.deepEqual(drawImageCalls.at(-1), fourPhotoDrawings.at(-1));
+      assert.equal(zoom.value, '2');
+    }
+    assert.deepEqual(revoked, [images[1].src]);
+  });
+});
+
+test('blocks four-photo export until all four slots are valid and exports the visible Post PNG', async () => {
+  for (const share of [false, true]) {
+    await withAsyncApp(async ({ select, upload, finish, elements, anchors, shares, exports, drawImageCalls }) => {
+      select('post-stack-4');
+      const photos = fourPhotoSlots.map(([slot]) => upload(`#post-photo-${slot}`));
+      assert.ok(photos.every(Boolean), 'four-photo slots are bound to their own uploads');
+      const download = elements.get('#download');
+
+      for (const image of photos.slice(0, 3)) {
+        await finish(image);
+        assert.equal(download.disabled, true);
+      }
+      await finish(photos[3], 'error');
+      assert.equal(download.disabled, true);
+      await Promise.all(download.emit('click'));
+      assert.deepEqual(exports, []);
+      assert.deepEqual(drawImageCalls.slice(-3).map(([image]) => image), photos.slice(0, 3));
+
+      const fourth = upload('#post-photo-bottom-left');
+      await finish(fourth);
+      assert.equal(download.disabled, false);
+      assert.deepEqual(drawImageCalls.slice(-4).map(([image]) => image), [...photos.slice(0, 3), fourth]);
+
+      const pending = download.emit('click');
+      if (share) assert.equal(shares.length, 1, 'native share starts before the click task yields');
+      await Promise.all(pending);
+      assert.deepEqual(exports, [[1080, 1440, 'image/png']]);
+      if (share) {
+        assert.equal(shares[0].files[0].name, 'instagram-post-stack-4.png');
+        assert.equal(shares[0].files[0].type, 'image/png');
+      } else {
+        assert.equal(anchors[0].download, 'instagram-post-stack-4.png');
+      }
+    }, { share });
+  }
 });
