@@ -1710,6 +1710,41 @@ test('the original Story and two-photo pairs resume after a temporary third fing
   });
 });
 
+test('rebases Story and both Post pinches after a third contact outside the canvas', async () => {
+  for (const template of ['cinema', 'post-stack', 'post-stack-4']) {
+    await withPostInteractionApp(async ({ canvas, point, elements, select, upload, finish, drawImageCalls }) => {
+      if (template === 'cinema') {
+        select(template);
+        await finish(upload('#photo'));
+      }
+      const zoom = elements.get('#zoom-value');
+      const pair = (rightX) => [point(180, 362), point(rightX, 362)];
+      canvas.emit('touchstart', { touches: pair(280) });
+      canvas.emit('touchmove', { touches: pair(290), preventDefault() {} });
+      assert.equal(zoom.value, '1,10×');
+      const count = drawImageCalls.length;
+
+      // The outside contact starts and ends on a different element, so the canvas sees only the moves.
+      canvas.emit('touchmove', {
+        touches: [...pair(330), point(1100, 362)],
+        preventDefault() { assert.fail('three contacts must stay native'); },
+      });
+      assert.equal(drawImageCalls.length, count);
+      assert.equal(zoom.value, '1,10×');
+
+      let prevented = 0;
+      const move = (rightX) => canvas.emit('touchmove', { touches: pair(rightX), preventDefault() { prevented++; } });
+      move(330);
+      assert.equal(zoom.value, '1,10×', `${template} should rebase without applying motion from the pause`);
+      assert.equal(drawImageCalls.length, count);
+      move(360);
+      assert.equal(prevented, 2);
+      assert.equal(zoom.value, '1,32×');
+      assert.ok(drawImageCalls.length > count);
+    }, template === 'post-stack-4' ? template : 'post-stack');
+  }
+});
+
 test('replacing a contact after switching templates leaves the sequence stale until fully released', async () => {
   await withPostInteractionApp(async ({ canvas, point, select, drawImageCalls, elements }) => {
     const pair = [point(180, 362), point(280, 362)];

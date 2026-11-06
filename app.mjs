@@ -545,6 +545,7 @@ function applyTouchGesture(touches) {
   const { media, frame } = gesture;
   const previous = gesture.geometry;
   const current = getTouchGestureGeometry(gesture, touches);
+  // A move can report extra contacts that started outside the canvas. Rebase after they lift.
   gesture.geometry = current;
   if (!current) return false;
   if (!previous) return true;
@@ -648,8 +649,7 @@ canvas.addEventListener('lostpointercapture', finishPointer);
 canvas.addEventListener('touchstart', handleTouchStart);
 
 canvas.addEventListener('touchmove', (event) => {
-  if (event.touches.length !== 2) return;
-  if (event.cancelable === false) {
+  if (event.touches.length === 2 && event.cancelable === false) {
     resetTouchSequence(true);
     return;
   }
